@@ -41,7 +41,7 @@ class MultiHeadAttention(nn.Module):
         v = v.reshape(batch, k_seq, self.n_head, self.head_dim).transpose(0, 2, 1, 3)
 
         if cache:
-            k, v = cache.update_and_fetch(k, v)
+            k, v = cache.update_and_fetch_kv(k, v)
 
         o = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
         o = o.transpose(0, 2, 1, 3).reshape(batch, q_seq, self.n_feat)
@@ -119,7 +119,7 @@ class RelPositionMultiHeadAttention(MultiHeadAttention):
         p = p.reshape(batch, pos_len, self.n_head, self.head_dim).transpose(0, 2, 1, 3)
 
         if cache is not None:
-            k, v = cache.update_and_fetch(k, v)
+            k, v = cache.update_and_fetch_kv(k, v)
 
         matrix_bd = mx.matmul(q_v, p.swapaxes(-2, -1))
         matrix_bd = self.rel_shift(matrix_bd)
