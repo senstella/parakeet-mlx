@@ -198,7 +198,7 @@ def transcribe(
     output_template: Annotated[
         str,
         typer.Option(
-            help="Template for output filenames, e.g. '{filename}_{date}_{index}'",
+            help="Template for output filenames, e.g. '{parent}/{filename}_{date}_{index}'",
             envvar="PARAKEET_OUTPUT_TEMPLATE",
         ),
     ] = "{filename}",
@@ -341,6 +341,7 @@ def transcribe(
                 base_filename = audio_path.stem
                 template_vars = {
                     "filename": base_filename,
+                    "parent": str(audio_path.parent),
                     "date": datetime.datetime.now().strftime("%Y%m%d"),
                     "index": str(i + 1),
                 }
@@ -350,8 +351,11 @@ def transcribe(
                 for fmt in formats_to_generate:
                     formatter = formatters[fmt]
                     output_content = formatter(result)
-                    output_filename = f"{output_basename}.{fmt}"
-                    output_filepath = output_dir / output_filename
+                    output_filename = Path(f"{output_basename}.{fmt}")
+                    if output_filename.is_absolute():
+                        output_filepath = output_filename
+                    else:
+                        output_filepath = output_dir / output_filename
 
                     try:
                         with open(output_filepath, "w", encoding="utf-8") as f:
