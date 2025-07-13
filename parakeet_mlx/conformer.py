@@ -190,15 +190,15 @@ class ConformerBlock(nn.Module):
         mask: mx.array | None = None,
         cache=None,
     ) -> mx.array:
-        x += 0.5 * self.feed_forward1(self.norm_feed_forward1(x))
+        x = x + 0.5 * self.feed_forward1(self.norm_feed_forward1(x))
 
         x_norm = self.norm_self_att(x)
-        x += self.self_attn(
+        x = x + self.self_attn(
             x_norm, x_norm, x_norm, mask=mask, pos_emb=pos_emb, cache=cache
         )
 
-        x += self.conv(self.norm_conv(x), cache=cache)
-        x += 0.5 * self.feed_forward2(self.norm_feed_forward2(x))
+        x = x + self.conv(self.norm_conv(x), cache=cache)
+        x = x + 0.5 * self.feed_forward2(self.norm_feed_forward2(x))
 
         return self.norm_out(x)
 

@@ -202,12 +202,14 @@ class RelPositionMultiHeadLocalAttention(RelPositionMultiHeadAttention):
         matrix_bd = mx.matmul(q_v, p.swapaxes(-2, -1))  # (batch, head, seq, 2w + 1)
 
         # we only add stuff in range and mask off unnecessaries
-        matrix_ac[:, :, :, : self.context_size[0]] += matrix_bd[
-            :, :, :, : self.context_size[0]
-        ]
-        matrix_ac[:, :, :, -(self.context_size[1] + 1) :] += matrix_bd[
-            :, :, :, self.context_size[0] :
-        ]
+        matrix_ac[:, :, :, : self.context_size[0]] = (
+            matrix_ac[:, :, :, : self.context_size[0]]
+            + matrix_bd[:, :, :, : self.context_size[0]]
+        )
+        matrix_ac[:, :, :, -(self.context_size[1] + 1) :] = (
+            matrix_ac[:, :, :, -(self.context_size[1] + 1) :]
+            + matrix_bd[:, :, :, self.context_size[0] :]
+        )
         matrix_ac[:, :, :, : (w - self.context_size[0])] = -mx.inf
         matrix_ac[:, :, :, (w + self.context_size[1] + 1) :] = -mx.inf
 
@@ -218,7 +220,7 @@ class RelPositionMultiHeadLocalAttention(RelPositionMultiHeadAttention):
         ones = mx.ones_like(float_mask)
         d_mask = self.matmul_qk(ones, float_mask, w)
 
-        scores += d_mask
+        scores = scores + d_mask
 
         attn = mx.softmax(scores, -1)
         attn = mx.where(mask, 0, attn)
