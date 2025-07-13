@@ -47,7 +47,7 @@ parakeet-mlx <audio_files> [OPTIONS]
   - Output format (txt/srt/vtt/json/all)
 
 - `--output-template` (default: `{filename}`, env: `PARAKEET_OUTPUT_TEMPLATE`)
-  - Template for output filenames, `{filename}`, `{index}`, `{date}` is supported.
+  - Template for output filenames, `{parent}`, `{filename}`, `{index}`, `{date}` is supported.
 
 - `--highlight-words` (default: False)
   - Enable word-level timestamps in SRT/VTT outputs
