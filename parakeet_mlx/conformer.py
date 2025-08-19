@@ -38,10 +38,16 @@ class ConformerArgs:
 
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model: int, d_ff: int, use_bias: bool = True):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int,
+        use_bias: bool = True,
+        activation: Literal["relu", "silu"] = "silu",
+    ):
         super().__init__()
         self.linear1 = nn.Linear(d_model, d_ff, bias=use_bias)
-        self.activation = nn.SiLU()
+        self.activation = nn.SiLU() if activation == "silu" else nn.ReLU()
         self.linear2 = nn.Linear(d_ff, d_model, bias=use_bias)
 
     def __call__(self, x: mx.array) -> mx.array:

@@ -154,3 +154,49 @@ class RotatingConformerCache(ConformerCache):
         result = mx.pad(result, ((0, 0), (0, padding), (0, 0)))
 
         return result
+
+
+class TransformerDecoderCache:
+    keys: mx.array | None
+    values: mx.array | None
+
+    offset: int
+    step = 256
+
+    def __init__(self):
+        self.keys = None
+        self.values = None
+        self.conv = None
+        self.offset = 0
+
+    def update_and_fetch_kv(
+        self, keys: mx.array, values: mx.array
+    ) -> tuple[mx.array, mx.array]:
+        # k, v is [batch, head, seq, dim]
+        prev = self.offset
+        if (
+            self.keys is None
+            or self.values is None
+            or (prev + keys.shape[2]) > self.keys.shape[2]
+        ):
+            B, H, S, D_KEYS = keys.shape
+            _, _, _, D_VALUES = values.shape
+            S_CACHE = ((self.step + S - 1) // self.step) * self.step
+
+            new_k = mx.zeros((B, H, S_CACHE, D_KEYS), keys.dtype)
+            new_v = mx.zeros((B, H, S_CACHE, D_VALUES), keys.dtype)
+
+            if self.keys is None or self.values is None:  # type safety!
+                self.keys, self.values = new_k, new_v
+            else:
+                if prev % self.step != 0:
+                    self.keys = self.keys[..., :prev, :]
+                    self.values = self.values[..., :prev, :]
+                self.keys = mx.concatenate([self.keys, new_k], axis=2)
+                self.values = mx.concatenate([self.values, new_v], axis=2)
+
+        self.offset += keys.shape[2]
+        self.keys[..., prev : self.offset, :] = keys
+        self.values[..., prev : self.offset, :] = values
+
+        return self.keys[..., : self.offset, :], self.values[..., : self.offset, :]

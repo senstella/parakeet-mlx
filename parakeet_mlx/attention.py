@@ -534,6 +534,52 @@ class RelPositionMultiHeadLocalAttention(RelPositionMultiHeadAttention):
         return outputs[0]
 
 
+# note that this has slight different scaling method than other encodings
+class FixedPositionalEncoding(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        max_len: int = 5000,
+    ):
+        assert d_model % 2 == 0 and max_len > 0
+        super().__init__()
+
+        self.d_model = d_model
+        self.max_len = max_len
+        self.scale = math.sqrt(self.d_model)
+        self.calculate_pe()
+
+    def calculate_pe(self):
+        positions = mx.arange(self.max_len, dtype=mx.float32)
+        positions = mx.expand_dims(positions, axis=1)
+
+        div_term = mx.exp(
+            mx.arange(0, self.d_model, 2, dtype=mx.float32)
+            * -(math.log(10000.0) / self.d_model)
+        )
+        pe = mx.zeros((self.max_len, self.d_model), dtype=mx.float32)
+
+        pe[:, 0::2] = mx.sin(positions * div_term)
+        pe[:, 1::2] = mx.cos(positions * div_term)
+
+        self._pe = (
+            mx.expand_dims(pe, axis=0).astype(mx.float32) / self.scale
+        )  # we scale here!
+
+        mx.eval(self._pe)
+
+    def __call__(self, x: mx.array, offset: int = 0) -> mx.array:
+        input_len = x.shape[1]
+
+        if offset + input_len > self.max_len:
+            self.max_len = offset + input_len
+            self.calculate_pe()
+
+        pos_emb = self._pe[:, offset : offset + input_len, :].astype(x.dtype)
+
+        return pos_emb
+
+
 class RelPositionalEncoding(nn.Module):
     def __init__(
         self,
