@@ -44,7 +44,7 @@ class MultiHeadAttention(nn.Module):
             k, v = cache.update_and_fetch_kv(k, v)
 
         o = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
-        o = o.transpose(0, 2, 1, 3).reshape(batch, q_seq, self.n_feat)
+        o = o.transpose(0, 2, 1, 3).reshape(batch, q_seq, self.head_dim * self.n_head)
 
         return self.linear_out(o)
 
@@ -670,3 +670,24 @@ class LocalRelPositionalEncoding(RelPositionalEncoding):
         pos_emb = self._pe[:, :end_idx].astype(x.dtype)
 
         return x, pos_emb
+
+
+# utility
+# thanks to mlx_lm
+def create_causal_mask(
+    N: int,
+    offset: int = 0,
+    window_size: int | None = None,
+    lengths: mx.array | None = None,
+):
+    rinds = mx.arange(offset + N)
+    linds = mx.arange(offset, offset + N) if offset else rinds
+    linds = linds[:, None]
+    rinds = rinds[None]
+    mask = linds >= rinds
+    if window_size is not None:
+        mask = mask & (linds <= rinds + window_size)
+    if lengths is not None:
+        lengths = lengths[:, None, None, None]
+        mask = mask & (rinds < lengths)
+    return mask

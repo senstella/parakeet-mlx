@@ -4,7 +4,11 @@ from typing import Literal
 import mlx.core as mx
 import mlx.nn as nn
 
-from parakeet_mlx.attention import FixedPositionalEncoding, MultiHeadAttention
+from parakeet_mlx.attention import (
+    FixedPositionalEncoding,
+    MultiHeadAttention,
+    create_causal_mask,
+)
 from parakeet_mlx.cache import TransformerDecoderCache
 from parakeet_mlx.conformer import FeedForward
 
@@ -21,6 +25,14 @@ class TransformerDecoderArgs:
     pre_ln_final_layer_norm: bool
     learn_positional_encodings: bool
     max_sequence_length: int
+
+
+@dataclass
+class TransformerHeadArgs:
+    log_softmax: bool
+    num_layers: int
+    hidden_size: int
+    num_classes: int  # this!
 
 
 class TransformerDecoderBlock(nn.Module):
@@ -62,7 +74,7 @@ class TransformerDecoderBlock(nn.Module):
         x = x + self.second_sub_layer(x_norm, xa, xa, mask=mask_xa)
 
         x_norm = self.layer_norm_3(x)
-        x = x + self.third_sub_layer(x)
+        x = x + self.third_sub_layer(x_norm)
 
         return x
 
@@ -101,19 +113,44 @@ class TransformerDecoder(nn.Module):
         # embedding
         offset = 0 if cache is None else cache[0].offset
 
-        x = self.embedding_layer_norm(
-            self.token_embedding(x)
-            + (
-                self.position_embedding(x, offset=offset)
-                if isinstance(self.position_embedding, FixedPositionalEncoding)
-                else self.position_embedding(mx.arange(offset, offset + x.shape[1]))
-            )
+        x = self.token_embedding(x)
+        x = x + (
+            self.position_embedding(x, offset=offset)
+            if isinstance(self.position_embedding, FixedPositionalEncoding)
+            else self.position_embedding(mx.arange(offset, offset + x.shape[1]))
         )
+        x = self.embedding_layer_norm(x)
 
-        # TODO: create attention mask here
+        mask_x = (
+            mask_x & create_causal_mask(x.shape[1], offset)
+            if mask_x is not None
+            else create_causal_mask(x.shape[1], offset)
+        )
         for i, layer in enumerate(self.layers):
             x = layer(
                 x, xa, mask_x, mask_xa, cache=cache[i] if cache is not None else None
             )
 
+        if self.final_layer_norm is not None:
+            x = self.final_layer_norm(x)
+
+        return x
+
+
+class TransformerHead(nn.Module):
+    def __init__(self, args: TransformerHeadArgs):
+        super().__init__()
+
+        if args.num_layers != 1:
+            raise NotImplementedError(
+                "Classification head has non-supported layers. Please open an issue in https://github.com/senstella/parakeet-mlx"
+            )
+
+        self.log_softmax = args.log_softmax
+
+        self.classifier = nn.Linear(args.hidden_size, args.num_classes)
+
+    def __call__(self, x: mx.array) -> mx.array:
+        x = self.classifier(x)
+        x = nn.log_softmax(x, -1) if self.log_softmax else x
         return x
