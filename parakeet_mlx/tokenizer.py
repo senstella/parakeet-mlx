@@ -1,3 +1,4 @@
+import json
 import re
 from functools import cached_property
 
@@ -38,6 +39,15 @@ class CanaryTokenizer:
             token: local_id + self.offsets["spl_tokens"]
             for token, local_id in tokenizers["spl_tokens"].get_vocab().items()
         }
+
+    @staticmethod
+    def from_data(tokenizer: dict[str, dict | str]):
+        return CanaryTokenizer(
+            {
+                i: Tokenizer.from_str(json.dumps(v) if isinstance(v, dict) else v)
+                for i, v in tokenizer.items()
+            }
+        )
 
     def encode(self, text: str, lang_id: str) -> list[int]:
         if lang_id == "spl_tokens":

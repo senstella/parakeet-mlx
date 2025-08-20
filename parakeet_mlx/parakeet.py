@@ -71,7 +71,7 @@ class ParakeetTDTCTCArgs(ParakeetTDTArgs):
 
 # API
 @dataclass
-class DecodingConfig:
+class ParakeetDecodingConfig:
     decoding: str = "greedy"
 
 
@@ -88,7 +88,10 @@ class BaseParakeet(nn.Module):
         self.encoder = Conformer(encoder_args)
 
     def generate(
-        self, mel: mx.array, *, decoding_config: DecodingConfig = DecodingConfig()
+        self,
+        mel: mx.array,
+        *,
+        decoding_config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> list[AlignedResult]:
         """
         Generate transcription results from the Parakeet model, handling batches and single input.
@@ -96,9 +99,9 @@ class BaseParakeet(nn.Module):
             mel (mx.array):
                 Mel-spectrogram input with shape [batch, sequence, mel_dim] for
                 batch processing or [sequence, mel_dim] for single input.
-            decoding_config (DecodingConfig, optional):
+            decoding_config (ParakeetDecodingConfig, optional):
                 Configuration object that controls decoding behavior and
-                parameters for the generation process. Defaults to DecodingConfig().
+                parameters for the generation process. Defaults to ParakeetDecodingConfig().
         Returns:
             list[AlignedResult]: List of transcription results with aligned tokens
                 and sentences, one for each input in the batch.
@@ -198,7 +201,7 @@ class BaseParakeet(nn.Module):
         depth=1,
         *,
         keep_original_attention: bool = False,
-        decoding_config: DecodingConfig = DecodingConfig(),
+        decoding_config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> "StreamingParakeet":
         """
         Create a StreamingParakeet object for real-time (streaming) inference.
@@ -221,9 +224,9 @@ class BaseParakeet(nn.Module):
             keep_original_attention (bool, optional):
                 Whether to preserve the original attention class
                 during streaming inference. Defaults to False. (Will switch to local attention.)
-            decoding_config (DecodingConfig, optional):
+            decoding_config (ParakeetDecodingConfig, optional):
                 Configuration object that controls decoding behavior
-                Defaults to DecodingConfig().
+                Defaults to ParakeetDecodingConfig().
         Returns:
             StreamingParakeet: A context manager for streaming inference.
         """
@@ -263,7 +266,7 @@ class ParakeetTDT(BaseParakeet):
         last_token: Optional[list[Optional[int]]] = None,
         hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
         *,
-        config: DecodingConfig = DecodingConfig(),
+        config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
         """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
         assert config.decoding == "greedy", (
@@ -352,7 +355,10 @@ class ParakeetTDT(BaseParakeet):
         return results, hidden_state
 
     def generate(
-        self, mel: mx.array, *, decoding_config: DecodingConfig = DecodingConfig()
+        self,
+        mel: mx.array,
+        *,
+        decoding_config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> list[AlignedResult]:
         if len(mel.shape) == 2:
             mel = mx.expand_dims(mel, 0)
@@ -391,7 +397,7 @@ class ParakeetRNNT(BaseParakeet):
         last_token: Optional[list[Optional[int]]] = None,
         hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
         *,
-        config: DecodingConfig = DecodingConfig(),
+        config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
         """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
         assert config.decoding == "greedy", (
@@ -472,7 +478,10 @@ class ParakeetRNNT(BaseParakeet):
         return results, hidden_state
 
     def generate(
-        self, mel: mx.array, *, decoding_config: DecodingConfig = DecodingConfig()
+        self,
+        mel: mx.array,
+        *,
+        decoding_config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> list[AlignedResult]:
         if len(mel.shape) == 2:
             mel = mx.expand_dims(mel, 0)
@@ -503,7 +512,7 @@ class ParakeetCTC(BaseParakeet):
         features: mx.array,
         lengths: mx.array,
         *,
-        config: DecodingConfig = DecodingConfig(),
+        config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> list[list[AlignedToken]]:
         """Run CTC decoder with features and lengths. Outputs list[list[AlignedToken]]."""
         B, S, *_ = features.shape
@@ -596,7 +605,10 @@ class ParakeetCTC(BaseParakeet):
         return results
 
     def generate(
-        self, mel: mx.array, *, decoding_config: DecodingConfig = DecodingConfig()
+        self,
+        mel: mx.array,
+        *,
+        decoding_config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> list[AlignedResult]:
         if len(mel.shape) == 2:
             mel = mx.expand_dims(mel, 0)
@@ -637,7 +649,7 @@ class StreamingParakeet:
 
     context_size: tuple[int, int]
     depth: int
-    decoding_config: DecodingConfig
+    decoding_config: ParakeetDecodingConfig
     keep_original_attention: bool = False
 
     def __init__(
@@ -647,7 +659,7 @@ class StreamingParakeet:
         depth: int = 1,
         *,
         keep_original_attention: bool = False,
-        decoding_config: DecodingConfig = DecodingConfig(),
+        decoding_config: ParakeetDecodingConfig = ParakeetDecodingConfig(),
     ) -> None:
         self.context_size = context_size
         self.depth = depth

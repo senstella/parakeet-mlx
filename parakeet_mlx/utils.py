@@ -6,6 +6,7 @@ from dacite import from_dict
 from huggingface_hub import hf_hub_download
 from mlx.utils import tree_flatten, tree_unflatten
 
+from parakeet_mlx.canary import Canary, CanaryArgs
 from parakeet_mlx.parakeet import (
     BaseParakeet,
     ParakeetCTC,
@@ -19,7 +20,7 @@ from parakeet_mlx.parakeet import (
 )
 
 
-def from_config(config: dict) -> BaseParakeet:
+def from_config(config: dict) -> BaseParakeet | Canary:
     """Loads model from config (randomized weight)"""
     if (
         config.get("target")
@@ -48,6 +49,12 @@ def from_config(config: dict) -> BaseParakeet:
     ):
         cfg = from_dict(ParakeetCTCArgs, config)
         model = ParakeetCTC(cfg)
+    elif (
+        config.get("target")
+        == "nemo.collections.asr.models.aed_multitask_models.EncDecMultiTaskModel"
+    ):
+        cfg = from_dict(CanaryArgs, config)
+        model = Canary(cfg)
     else:
         raise ValueError("Model is not supported yet!")
 
@@ -58,7 +65,7 @@ def from_config(config: dict) -> BaseParakeet:
 
 def from_pretrained(
     hf_id_or_path: str, *, dtype: mx.Dtype = mx.bfloat16
-) -> BaseParakeet:
+) -> BaseParakeet | Canary:
     """Loads model from Hugging Face or local directory"""
     try:
         config = json.load(open(hf_hub_download(hf_id_or_path, "config.json"), "r"))
