@@ -29,7 +29,6 @@ class TransformerDecoderArgs:
 
 @dataclass
 class TransformerHeadArgs:
-    log_softmax: bool
     num_layers: int
     hidden_size: int
     num_classes: int  # this!
@@ -146,11 +145,8 @@ class TransformerHead(nn.Module):
                 "Classification head has non-supported layers. Please open an issue in https://github.com/senstella/parakeet-mlx"
             )
 
-        self.log_softmax = args.log_softmax
-
         self.classifier = nn.Linear(args.hidden_size, args.num_classes)
 
     def __call__(self, x: mx.array) -> mx.array:
         x = self.classifier(x)
-        x = nn.log_softmax(x, -1) if self.log_softmax else x
         return x
