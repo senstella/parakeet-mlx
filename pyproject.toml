@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "parakeet-mlx"
-version = "0.3.5"
+version = "0.3.6"
 description = "An implementation of the Nvidia's Parakeet models for Apple Silicon using MLX."
 readme = "README.md"
 requires-python = ">=3.10"
