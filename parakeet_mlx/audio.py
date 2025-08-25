@@ -114,7 +114,7 @@ def stft(
             padding = [(0, n_fft - win_length)]
             window = mx.pad(window, padding)
 
-    def _pad(x, padding, pad_mode="constant"):
+    def _pad(x, padding, pad_mode="reflect"):
         if pad_mode == "constant":
             return mx.pad(x, [(padding, padding)])
         elif pad_mode == "reflect":
@@ -147,7 +147,7 @@ def get_logmel(x: mx.array, args: PreprocessArgs) -> mx.array:
 
     window = (
         hanning(args.win_length).astype(x.dtype)
-        if args.window == "hanning"
+        if args.window == "hann" or args.window == "hanning"
         else hamming(args.win_length).astype(x.dtype)
         if args.window == "hamming"
         else blackman(args.win_length).astype(x.dtype)
