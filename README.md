@@ -37,7 +37,7 @@ parakeet-mlx <audio_files> [OPTIONS]
 
 ## Options
 
-- `--model` (default: `mlx-community/parakeet-tdt-0.6b-v2`, env: `PARAKEET_MODEL`)
+- `--model` (default: `mlx-community/parakeet-tdt-0.6b-v3`, env: `PARAKEET_MODEL`)
   - Hugging Face repository of the model to use
 
 - `--output-dir` (default: current directory)
@@ -92,7 +92,7 @@ Transcribe a file:
 ```py
 from parakeet_mlx import from_pretrained
 
-model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v2")
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
 
 result = model.transcribe("audio_file.wav")
 
@@ -104,7 +104,7 @@ Check timestamps:
 ```py
 from parakeet_mlx import from_pretrained
 
-model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v2")
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
 
 result = model.transcribe("audio_file.wav")
 
@@ -117,7 +117,7 @@ Do chunking:
 ```py
 from parakeet_mlx import from_pretrained
 
-model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v2")
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
 
 result = model.transcribe("audio_file.wav", chunk_duration=60 * 2.0, overlap_duration=15.0)
 
@@ -129,7 +129,7 @@ Use local attention:
 ```py
 from parakeet_mlx import from_pretrained
 
-model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v2")
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
 
 model.encoder.set_attention_model(
     "rel_pos_local_attn", # Follows NeMo's naming convention
@@ -167,7 +167,7 @@ from parakeet_mlx import from_pretrained
 from parakeet_mlx.audio import load_audio
 import numpy as np
 
-model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v2")
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
 
 # Create a streaming context
 with model.transcribe_stream(

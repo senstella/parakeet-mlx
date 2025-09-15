@@ -184,7 +184,7 @@ def transcribe(
         typer.Option(
             help="Hugging Face repository of model to use", envvar="PARAKEET_MODEL"
         ),
-    ] = "mlx-community/parakeet-tdt-0.6b-v2",
+    ] = "mlx-community/parakeet-tdt-0.6b-v3",
     output_dir: Annotated[
         Path, typer.Option(help="Directory to save transcriptions")
     ] = Path("."),
@@ -375,7 +375,7 @@ def transcribe(
             progress.update(task, total=total_files, completed=i + 1)
 
     print(
-        f"\n[bold green]Transcription complete.[/bold green] Outputs saved in '{output_dir.resolve()}'."
+        f"\n[bold green]{model.removeprefix('mlx-community/')} transcription complete.[/bold green] Outputs saved in '{output_dir.resolve()}'."
     )
 
 
