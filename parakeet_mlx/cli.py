@@ -375,7 +375,7 @@ def transcribe(
             progress.update(task, total=total_files, completed=i + 1)
 
     print(
-        f"\n[bold green]Transcription complete.[/bold green] Outputs saved in '{output_dir.resolve()}'."
+        f"\n[bold green]{model.removeprefix('mlx-community/')} transcription complete.[/bold green] Outputs saved in '{output_dir.resolve()}'."
     )
 
 
