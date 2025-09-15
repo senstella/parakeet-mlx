@@ -184,7 +184,7 @@ def transcribe(
         typer.Option(
             help="Hugging Face repository of model to use", envvar="PARAKEET_MODEL"
         ),
-    ] = "mlx-community/parakeet-tdt-0.6b-v2",
+    ] = "mlx-community/parakeet-tdt-0.6b-v3",
     output_dir: Annotated[
         Path, typer.Option(help="Directory to save transcriptions")
     ] = Path("."),
