@@ -141,6 +141,10 @@ result = model.transcribe("audio_file.wav")
 print(result.sentences)
 ```
 
+## from_pretrained
+
+Using `from_pretrained` downloads a model from Hugging Face and stores the downloaded model in HF's [cache folder](https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache). It can return one of those Parakeet variants such as: `ParakeetTDT`, `ParakeetRNNT`, `ParakeetCTC`, or `ParakeetTDTCTC`. For general use cases, the `BaseParakeet` abstraction often suffices. However, if you want to call variant-specific functions like `.decode()` and want linters not to complain, `typing.cast` can be used.
+
 ## Timestamp Result
 
 - `AlignedResult`: Top-level result containing the full text and sentences
