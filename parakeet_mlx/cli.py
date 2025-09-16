@@ -16,6 +16,7 @@ from rich.progress import (
 from typing_extensions import Annotated
 
 from parakeet_mlx import AlignedResult, AlignedSentence, AlignedToken, from_pretrained
+from parakeet_mlx.parakeet import BaseParakeet
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -322,6 +323,9 @@ def transcribe(
                 )
 
             try:
+                if not isinstance(loaded_model, BaseParakeet):
+                    return  # TODO: HANDLE ME
+
                 result: AlignedResult = loaded_model.transcribe(
                     audio_path,
                     dtype=bfloat16 if not fp32 else float32,

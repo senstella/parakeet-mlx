@@ -1,9 +1,9 @@
 from parakeet_mlx.alignment import AlignedResult, AlignedSentence, AlignedToken
 from parakeet_mlx.parakeet import (
     BaseParakeet,
-    DecodingConfig,
     ParakeetCTC,
     ParakeetCTCArgs,
+    ParakeetDecodingConfig,
     ParakeetRNNT,
     ParakeetRNNTArgs,
     ParakeetTDT,
@@ -15,7 +15,7 @@ from parakeet_mlx.parakeet import (
 from parakeet_mlx.utils import from_pretrained
 
 __all__ = [
-    "DecodingConfig",
+    "ParakeetDecodingConfig",
     "ParakeetTDTArgs",
     "ParakeetTDT",
     "ParakeetRNNT",

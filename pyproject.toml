@@ -14,6 +14,7 @@ dependencies = [
     "librosa>=0.11.0",
     "mlx>=0.22.1",
     "numpy>=2.2.5",
+    "tokenizers>=0.20.4",
     "typer>=0.15.3",
 ]
 license = "Apache-2.0"

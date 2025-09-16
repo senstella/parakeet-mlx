@@ -44,7 +44,7 @@ class MultiHeadAttention(nn.Module):
             k, v = cache.update_and_fetch_kv(k, v)
 
         o = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
-        o = o.transpose(0, 2, 1, 3).reshape(batch, q_seq, self.n_feat)
+        o = o.transpose(0, 2, 1, 3).reshape(batch, q_seq, self.head_dim * self.n_head)
 
         return self.linear_out(o)
 
@@ -534,6 +534,52 @@ class RelPositionMultiHeadLocalAttention(RelPositionMultiHeadAttention):
         return outputs[0]
 
 
+# note that this has slight different scaling method than other encodings
+class FixedPositionalEncoding(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        max_len: int = 5000,
+    ):
+        assert d_model % 2 == 0 and max_len > 0
+        super().__init__()
+
+        self.d_model = d_model
+        self.max_len = max_len
+        self.scale = math.sqrt(self.d_model)
+        self.calculate_pe()
+
+    def calculate_pe(self):
+        positions = mx.arange(self.max_len, dtype=mx.float32)
+        positions = mx.expand_dims(positions, axis=1)
+
+        div_term = mx.exp(
+            mx.arange(0, self.d_model, 2, dtype=mx.float32)
+            * -(math.log(10000.0) / self.d_model)
+        )
+        pe = mx.zeros((self.max_len, self.d_model), dtype=mx.float32)
+
+        pe[:, 0::2] = mx.sin(positions * div_term)
+        pe[:, 1::2] = mx.cos(positions * div_term)
+
+        self._pe = (
+            mx.expand_dims(pe, axis=0).astype(mx.float32) / self.scale
+        )  # we scale here!
+
+        mx.eval(self._pe)
+
+    def __call__(self, x: mx.array, offset: int = 0) -> mx.array:
+        input_len = x.shape[1]
+
+        if offset + input_len > self.max_len:
+            self.max_len = offset + input_len
+            self.calculate_pe()
+
+        pos_emb = self._pe[:, offset : offset + input_len, :].astype(x.dtype)
+
+        return pos_emb
+
+
 class RelPositionalEncoding(nn.Module):
     def __init__(
         self,
@@ -624,3 +670,24 @@ class LocalRelPositionalEncoding(RelPositionalEncoding):
         pos_emb = self._pe[:, :end_idx].astype(x.dtype)
 
         return x, pos_emb
+
+
+# utility
+# thanks to mlx_lm
+def create_causal_mask(
+    N: int,
+    offset: int = 0,
+    window_size: int | None = None,
+    lengths: mx.array | None = None,
+):
+    rinds = mx.arange(offset + N)
+    linds = mx.arange(offset, offset + N) if offset else rinds
+    linds = linds[:, None]
+    rinds = rinds[None]
+    mask = linds >= rinds
+    if window_size is not None:
+        mask = mask & (linds <= rinds + window_size)
+    if lengths is not None:
+        lengths = lengths[:, None, None, None]
+        mask = mask & (rinds < lengths)
+    return mask
