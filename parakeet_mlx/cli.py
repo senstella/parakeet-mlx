@@ -1,7 +1,7 @@
 import datetime
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import typer
 from mlx.core import bfloat16, float32
@@ -246,6 +246,13 @@ def transcribe(
             envvar="PARAKEET_LOCAL_ATTENTION_CTX",
         ),
     ] = 256,
+    cache_dir: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Directory for HuggingFace model cache. If not specified, uses HF's default cache location",
+            envvar="PARAKEET_CACHE_DIR",
+        ),
+    ] = None,
 ):
     """
     Transcribe audio files using Parakeet MLX models.
@@ -254,7 +261,9 @@ def transcribe(
         print(f"Loading model: [bold cyan]{model}[/bold cyan]...")
 
     try:
-        loaded_model = from_pretrained(model, dtype=bfloat16 if not fp32 else float32)
+        loaded_model = from_pretrained(
+            model, dtype=bfloat16 if not fp32 else float32, cache_dir=cache_dir
+        )
 
         if local_attention:
             loaded_model.encoder.set_attention_model(

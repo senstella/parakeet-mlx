@@ -57,12 +57,21 @@ def from_config(config: dict) -> BaseParakeet:
 
 
 def from_pretrained(
-    hf_id_or_path: str, *, dtype: mx.Dtype = mx.bfloat16
+    hf_id_or_path: str,
+    *,
+    dtype: mx.Dtype = mx.bfloat16,
+    cache_dir: str | Path | None = None,
 ) -> BaseParakeet:
     """Loads model from Hugging Face or local directory"""
     try:
-        config = json.load(open(hf_hub_download(hf_id_or_path, "config.json"), "r"))
-        weight = hf_hub_download(hf_id_or_path, "model.safetensors")
+        config = json.load(
+            open(
+                hf_hub_download(hf_id_or_path, "config.json", cache_dir=cache_dir), "r"
+            )
+        )
+        weight = hf_hub_download(
+            hf_id_or_path, "model.safetensors", cache_dir=cache_dir
+        )
     except Exception:
         config = json.load(open(Path(hf_id_or_path) / "config.json", "r"))
         weight = str(Path(hf_id_or_path) / "model.safetensors")

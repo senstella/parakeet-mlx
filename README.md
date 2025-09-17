@@ -71,6 +71,9 @@ parakeet-mlx <audio_files> [OPTIONS]
 - `--local-attention-context-size` (default: 256, env: `PARAKEET_LOCAL_ATTENTION_CTX`)
   - Local attention context size(window) in frames of Parakeet model
 
+- `--cache-dir` (default: None, env: `PARAKEET_CACHE_DIR`)
+  - Directory for HuggingFace model cache. If not specified, uses HF's default cache location [(~/.cache/huggingface or values you set in `HF_HOME` or `HF_HUB_CACHE`)](https://huggingface.co/docs/huggingface_hub/guides/manage-cache)
+
 ## Examples
 
 ```bash
@@ -143,7 +146,7 @@ print(result.sentences)
 
 ## from_pretrained
 
-Using `from_pretrained` downloads a model from Hugging Face and stores the downloaded model in HF's [cache folder](https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache). It can return one of those Parakeet variants such as: `ParakeetTDT`, `ParakeetRNNT`, `ParakeetCTC`, or `ParakeetTDTCTC`. For general use cases, the `BaseParakeet` abstraction often suffices. However, if you want to call variant-specific functions like `.decode()` and want linters not to complain, `typing.cast` can be used.
+Using `from_pretrained` downloads a model from Hugging Face and stores the downloaded model in HF's [cache folder](https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache). You can specify the cache folder by passing it `cache_dir` args. It can return one of those Parakeet variants such as: `ParakeetTDT`, `ParakeetRNNT`, `ParakeetCTC`, or `ParakeetTDTCTC`. For general use cases, the `BaseParakeet` abstraction often suffices. However, if you want to call variant-specific functions like `.decode()` and want linters not to complain, `typing.cast` can be used.
 
 ## Timestamp Result
 
