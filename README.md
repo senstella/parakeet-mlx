@@ -72,7 +72,7 @@ parakeet-mlx <audio_files> [OPTIONS]
   - Local attention context size(window) in frames of Parakeet model
 
 - `--cache-dir` (default: None, env: `PARAKEET_CACHE_DIR`)
-  - Directory for HuggingFace model cache. If not specified, uses HF's default cache location [(~/.cache/huggingface or values you set in `HF_HOME` or `HF_HUB_CACHE`)](https://huggingface.co/docs/huggingface_hub/guides/manage-cache)
+  - Directory for HuggingFace model cache. If not specified, uses HF's default cache location [(~/.cache/huggingface or values you set in `HF_HOME` or `HF_HUB_CACHE` which is essentially `$HF_HOME/hub`)](https://huggingface.co/docs/huggingface_hub/guides/manage-cache)
 
 ## Examples
 
