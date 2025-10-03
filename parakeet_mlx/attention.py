@@ -44,7 +44,7 @@ class MultiHeadAttention(nn.Module):
             k, v = cache.update_and_fetch_kv(k, v)
 
         o = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
-        o = o.transpose(0, 2, 1, 3).reshape(batch, q_seq, self.n_feat)
+        o = o.transpose(0, 2, 1, 3).reshape(batch, q_seq, self.head_dim * self.n_head)
 
         return self.linear_out(o)
 
