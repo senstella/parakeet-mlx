@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass
 class AlignedToken:
@@ -29,10 +31,8 @@ class AlignedSentence:
         self.end = self.tokens[-1].end
         self.duration = self.end - self.start
         # Compute geometric mean of token confidences
-        if self.tokens:
-            import mlx.core as mx
-            confidences = mx.array([t.confidence for t in self.tokens])
-            self.confidence = float(mx.exp(mx.mean(mx.log(confidences + 1e-10))))
+        confidences = np.array([t.confidence for t in self.tokens])
+        self.confidence = float(np.exp(np.mean(np.log(confidences + 1e-10))))
 
 
 @dataclass
