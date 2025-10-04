@@ -144,6 +144,7 @@ def _aligned_token_to_dict(token: AlignedToken) -> Dict[str, Any]:
         "start": round(token.start, 3),
         "end": round(token.end, 3),
         "duration": round(token.duration, 3),
+        "confidence": round(token.confidence, 3),
     }
 
 
@@ -153,6 +154,7 @@ def _aligned_sentence_to_dict(sentence: AlignedSentence) -> Dict[str, Any]:
         "start": round(sentence.start, 3),
         "end": round(sentence.end, 3),
         "duration": round(sentence.duration, 3),
+        "confidence": round(sentence.confidence, 3),
         "tokens": [_aligned_token_to_dict(token) for token in sentence.tokens],
     }
 
@@ -343,8 +345,9 @@ def transcribe(
 
                 if verbose:
                     for sentence in result.sentences:
-                        start, end, text = sentence.start, sentence.end, sentence.text
-                        line = f"[blue][{format_timestamp(start)} --> {format_timestamp(end)}][/blue] {text.strip()}"
+                        start, end, text, conf = sentence.start, sentence.end, sentence.text, sentence.confidence
+                        conf_str = f" [dim](confidence: {conf:.2%})[/dim]"
+                        line = f"[blue][{format_timestamp(start)} --> {format_timestamp(end)}][/blue]{conf_str} {text.strip()}"
                         print(line)
 
                 base_filename = audio_path.stem
