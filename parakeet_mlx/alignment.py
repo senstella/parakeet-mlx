@@ -7,6 +7,7 @@ class AlignedToken:
     text: str
     start: float
     duration: float
+    confidence: float = 1.0  # confidence score (0.0 to 1.0)
     end: float = 0.0  # temporary
 
     def __post_init__(self) -> None:
@@ -20,12 +21,18 @@ class AlignedSentence:
     start: float = 0.0  # temporary
     end: float = 0.0  # temporary
     duration: float = 0.0  # temporary
+    confidence: float = 1.0  # aggregate confidence score
 
     def __post_init__(self) -> None:
         self.tokens = list(sorted(self.tokens, key=lambda x: x.start))
         self.start = self.tokens[0].start
         self.end = self.tokens[-1].end
         self.duration = self.end - self.start
+        # Compute geometric mean of token confidences
+        if self.tokens:
+            import mlx.core as mx
+            confidences = mx.array([t.confidence for t in self.tokens])
+            self.confidence = float(mx.exp(mx.mean(mx.log(confidences + 1e-10))))
 
 
 @dataclass

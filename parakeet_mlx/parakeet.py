@@ -309,9 +309,16 @@ class ParakeetTDT(BaseParakeet):
                 joint_out = self.joint(feature[:, step : step + 1], decoder_out)
 
                 # sampling
-                pred_token = int(
-                    mx.argmax(joint_out[0, 0, :, : len(self.vocabulary) + 1])
-                )
+                token_logits = joint_out[0, 0, :, : len(self.vocabulary) + 1]
+                pred_token = int(mx.argmax(token_logits))
+                
+                # compute confidence score using entropy-based method
+                token_probs = mx.softmax(token_logits, axis=-1)
+                vocab_size = len(self.vocabulary) + 1
+                entropy = -mx.sum(token_probs * mx.log(token_probs + 1e-10), axis=-1)
+                max_entropy = mx.log(mx.array(vocab_size, dtype=token_probs.dtype))
+                confidence = float(1.0 - (entropy / max_entropy))
+                
                 decision = int(
                     mx.argmax(joint_out[0, 0, :, len(self.vocabulary) + 1 :])
                 )
@@ -329,6 +336,7 @@ class ParakeetTDT(BaseParakeet):
                             * self.encoder_config.subsampling_factor
                             / self.preprocessor_config.sample_rate
                             * self.preprocessor_config.hop_length,  # hop
+                            confidence=confidence,
                             text=tokenizer.decode([pred_token], self.vocabulary),
                         )
                     )
@@ -437,7 +445,15 @@ class ParakeetRNNT(BaseParakeet):
                 joint_out = self.joint(feature[:, step : step + 1], decoder_out)
 
                 # sampling
-                pred_token = int(mx.argmax(joint_out[0, 0]))
+                token_logits = joint_out[0, 0]
+                pred_token = int(mx.argmax(token_logits))
+                
+                # compute confidence score using entropy-based method
+                token_probs = mx.softmax(token_logits, axis=-1)
+                vocab_size = len(self.vocabulary) + 1
+                entropy = -mx.sum(token_probs * mx.log(token_probs + 1e-10), axis=-1)
+                max_entropy = mx.log(mx.array(vocab_size, dtype=token_probs.dtype))
+                confidence = float(1.0 - (entropy / max_entropy))
 
                 # rnnt decoding rule
                 if pred_token != len(self.vocabulary):
@@ -452,6 +468,7 @@ class ParakeetRNNT(BaseParakeet):
                             * self.encoder_config.subsampling_factor
                             / self.preprocessor_config.sample_rate
                             * self.preprocessor_config.hop_length,  # hop
+                            confidence=confidence,
                             text=tokenizer.decode([pred_token], self.vocabulary),
                         )
                     )
@@ -516,6 +533,9 @@ class ParakeetCTC(BaseParakeet):
             length = int(lengths[batch])
             predictions = logits[batch, :length]
             best_tokens = mx.argmax(predictions, axis=1)
+            
+            # Convert log probabilities to probabilities for confidence computation
+            probs = mx.exp(predictions)
 
             hypothesis = []
             token_boundaries = []
@@ -546,12 +566,25 @@ class ParakeetCTC(BaseParakeet):
                     )
 
                     token_duration = token_end_time - token_start_time
+                    
+                    # Compute confidence using entropy-based method across token frames
+                    token_start_frame = token_boundaries[-1][0]
+                    token_end_frame = t
+                    token_probs = probs[token_start_frame:token_end_frame]
+                    
+                    # Compute average entropy across frames
+                    vocab_size = len(self.vocabulary) + 1
+                    entropies = -mx.sum(token_probs * mx.log(token_probs + 1e-10), axis=-1)
+                    avg_entropy = mx.mean(entropies)
+                    max_entropy = mx.log(mx.array(vocab_size, dtype=token_probs.dtype))
+                    confidence = float(1.0 - (avg_entropy / max_entropy))
 
                     hypothesis.append(
                         AlignedToken(
                             prev_token,
                             start=token_start_time,
                             duration=token_duration,
+                            confidence=confidence,
                             text=tokenizer.decode([prev_token], self.vocabulary),
                         )
                     )
@@ -581,12 +614,24 @@ class ParakeetCTC(BaseParakeet):
                 )
 
                 token_duration = token_end_time - token_start_time
+                
+                # Compute confidence for last token
+                token_start_frame = token_boundaries[-1][0]
+                token_end_frame = last_non_blank + 1
+                token_probs = probs[token_start_frame:token_end_frame]
+                
+                vocab_size = len(self.vocabulary) + 1
+                entropies = -mx.sum(token_probs * mx.log(token_probs + 1e-10), axis=-1)
+                avg_entropy = mx.mean(entropies)
+                max_entropy = mx.log(mx.array(vocab_size, dtype=token_probs.dtype))
+                confidence = float(1.0 - (avg_entropy / max_entropy))
 
                 hypothesis.append(
                     AlignedToken(
                         prev_token,
                         start=token_start_time,
                         duration=token_duration,
+                        confidence=confidence,
                         text=tokenizer.decode([prev_token], self.vocabulary),
                     )
                 )
