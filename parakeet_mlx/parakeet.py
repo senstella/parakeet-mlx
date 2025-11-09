@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -9,6 +9,7 @@ from parakeet_mlx import tokenizer
 from parakeet_mlx.alignment import (
     AlignedResult,
     AlignedToken,
+    SentenceConfig,
     merge_longest_common_subsequence,
     merge_longest_contiguous,
     sentences_to_result,
@@ -73,6 +74,7 @@ class ParakeetTDTCTCArgs(ParakeetTDTArgs):
 @dataclass
 class DecodingConfig:
     decoding: str = "greedy"
+    sentence: SentenceConfig = field(default_factory=SentenceConfig)
 
 
 # common methods
@@ -110,6 +112,7 @@ class BaseParakeet(nn.Module):
         path: Path | str,
         *,
         dtype: mx.Dtype = mx.bfloat16,
+        decoding_config: DecodingConfig = DecodingConfig(),
         chunk_duration: Optional[float] = None,
         overlap_duration: float = 15.0,
         chunk_callback: Optional[Callable] = None,
@@ -140,13 +143,13 @@ class BaseParakeet(nn.Module):
 
         if chunk_duration is None:
             mel = get_logmel(audio_data, self.preprocessor_config)
-            return self.generate(mel)[0]
+            return self.generate(mel, decoding_config=decoding_config)[0]
 
         audio_length_seconds = len(audio_data) / self.preprocessor_config.sample_rate
 
         if audio_length_seconds <= chunk_duration:
             mel = get_logmel(audio_data, self.preprocessor_config)
-            return self.generate(mel)[0]
+            return self.generate(mel, decoding_config=decoding_config)[0]
 
         chunk_samples = int(chunk_duration * self.preprocessor_config.sample_rate)
         overlap_samples = int(overlap_duration * self.preprocessor_config.sample_rate)
@@ -165,7 +168,7 @@ class BaseParakeet(nn.Module):
             chunk_audio = audio_data[start:end]
             chunk_mel = get_logmel(chunk_audio, self.preprocessor_config)
 
-            chunk_result = self.generate(chunk_mel)[0]
+            chunk_result = self.generate(chunk_mel, decoding_config=decoding_config)[0]
 
             chunk_offset = start / self.preprocessor_config.sample_rate
             for sentence in chunk_result.sentences:
@@ -189,7 +192,9 @@ class BaseParakeet(nn.Module):
             else:
                 all_tokens = chunk_result.tokens
 
-        result = sentences_to_result(tokens_to_sentences(all_tokens))
+        result = sentences_to_result(
+            tokens_to_sentences(all_tokens, decoding_config.sentence)
+        )
         return result
 
     def transcribe_stream(
@@ -311,14 +316,14 @@ class ParakeetTDT(BaseParakeet):
                 # sampling
                 token_logits = joint_out[0, 0, :, : len(self.vocabulary) + 1]
                 pred_token = int(mx.argmax(token_logits))
-                
+
                 # compute confidence score using entropy-based method
                 token_probs = mx.softmax(token_logits, axis=-1)
                 vocab_size = len(self.vocabulary) + 1
                 entropy = -mx.sum(token_probs * mx.log(token_probs + 1e-10), axis=-1)
                 max_entropy = mx.log(mx.array(vocab_size, dtype=token_probs.dtype))
                 confidence = float(1.0 - (entropy / max_entropy))
-                
+
                 decision = int(
                     mx.argmax(joint_out[0, 0, :, len(self.vocabulary) + 1 :])
                 )
@@ -371,7 +376,9 @@ class ParakeetTDT(BaseParakeet):
         result, _ = self.decode(features, lengths, config=decoding_config)
 
         return [
-            sentences_to_result(tokens_to_sentences(hypothesis))
+            sentences_to_result(
+                tokens_to_sentences(hypothesis, decoding_config.sentence)
+            )
             for hypothesis in result
         ]
 
@@ -447,7 +454,7 @@ class ParakeetRNNT(BaseParakeet):
                 # sampling
                 token_logits = joint_out[0, 0]
                 pred_token = int(mx.argmax(token_logits))
-                
+
                 # compute confidence score using entropy-based method
                 token_probs = mx.softmax(token_logits, axis=-1)
                 vocab_size = len(self.vocabulary) + 1
@@ -500,7 +507,9 @@ class ParakeetRNNT(BaseParakeet):
         result, _ = self.decode(features, lengths, config=decoding_config)
 
         return [
-            sentences_to_result(tokens_to_sentences(hypothesis))
+            sentences_to_result(
+                tokens_to_sentences(hypothesis, decoding_config.sentence)
+            )
             for hypothesis in result
         ]
 
@@ -533,7 +542,7 @@ class ParakeetCTC(BaseParakeet):
             length = int(lengths[batch])
             predictions = logits[batch, :length]
             best_tokens = mx.argmax(predictions, axis=1)
-            
+
             # Convert log probabilities to probabilities for confidence computation
             probs = mx.exp(predictions)
 
@@ -566,15 +575,17 @@ class ParakeetCTC(BaseParakeet):
                     )
 
                     token_duration = token_end_time - token_start_time
-                    
+
                     # Compute confidence using entropy-based method across token frames
                     token_start_frame = token_boundaries[-1][0]
                     token_end_frame = t
                     token_probs = probs[token_start_frame:token_end_frame]
-                    
+
                     # Compute average entropy across frames
                     vocab_size = len(self.vocabulary) + 1
-                    entropies = -mx.sum(token_probs * mx.log(token_probs + 1e-10), axis=-1)
+                    entropies = -mx.sum(
+                        token_probs * mx.log(token_probs + 1e-10), axis=-1
+                    )
                     avg_entropy = mx.mean(entropies)
                     max_entropy = mx.log(mx.array(vocab_size, dtype=token_probs.dtype))
                     confidence = float(1.0 - (avg_entropy / max_entropy))
@@ -614,12 +625,12 @@ class ParakeetCTC(BaseParakeet):
                 )
 
                 token_duration = token_end_time - token_start_time
-                
+
                 # Compute confidence for last token
                 token_start_frame = token_boundaries[-1][0]
                 token_end_frame = last_non_blank + 1
                 token_probs = probs[token_start_frame:token_end_frame]
-                
+
                 vocab_size = len(self.vocabulary) + 1
                 entropies = -mx.sum(token_probs * mx.log(token_probs + 1e-10), axis=-1)
                 avg_entropy = mx.mean(entropies)
@@ -651,7 +662,9 @@ class ParakeetCTC(BaseParakeet):
         result = self.decode(features, lengths, config=decoding_config)
 
         return [
-            sentences_to_result(tokens_to_sentences(hypothesis))
+            sentences_to_result(
+                tokens_to_sentences(hypothesis, decoding_config.sentence)
+            )
             for hypothesis in result
         ]
 
@@ -741,7 +754,9 @@ class StreamingParakeet:
     def result(self) -> AlignedResult:
         """Transcription result"""
         return sentences_to_result(
-            tokens_to_sentences(self.finalized_tokens + self.draft_tokens)
+            tokens_to_sentences(
+                self.finalized_tokens + self.draft_tokens, self.decoding_config.sentence
+            )
         )
 
     def add_audio(self, audio: mx.array) -> None:

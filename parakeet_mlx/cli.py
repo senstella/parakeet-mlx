@@ -16,6 +16,8 @@ from rich.progress import (
 from typing_extensions import Annotated
 
 from parakeet_mlx import AlignedResult, AlignedSentence, AlignedToken, from_pretrained
+from parakeet_mlx.alignment import SentenceConfig
+from parakeet_mlx.parakeet import DecodingConfig
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -222,6 +224,30 @@ def transcribe(
             envvar="PARAKEET_OVERLAP_DURATION",
         ),
     ] = 15,
+    max_words: Annotated[
+        Optional[int],
+        typer.Option(
+            "--max-words",
+            help="Max words per sentence",
+            envvar="PARAKEET_MAX_WORDS",
+        ),
+    ] = None,
+    silence_gap: Annotated[
+        Optional[float],
+        typer.Option(
+            "--silence-gap",
+            help="Split at silence gaps (seconds)",
+            envvar="PARAKEET_SILENCE_GAP",
+        ),
+    ] = None,
+    max_duration: Annotated[
+        Optional[float],
+        typer.Option(
+            "--max-duration",
+            help="Max sentence duration (seconds)",
+            envvar="PARAKEET_MAX_DURATION",
+        ),
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Print out process and debug messages"),
@@ -312,6 +338,12 @@ def transcribe(
     if verbose:
         print(f"Transcribing {total_files} file(s)...")
 
+    decoding_config = DecodingConfig(
+        sentence=SentenceConfig(
+            max_words=max_words, silence_gap=silence_gap, max_duration=max_duration
+        )
+    )
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -341,11 +373,17 @@ def transcribe(
                     chunk_callback=lambda current, full: progress.update(
                         task, total=total_files * full, completed=full * i + current
                     ),
+                    decoding_config=decoding_config,
                 )
 
                 if verbose:
                     for sentence in result.sentences:
-                        start, end, text, conf = sentence.start, sentence.end, sentence.text, sentence.confidence
+                        start, end, text, conf = (
+                            sentence.start,
+                            sentence.end,
+                            sentence.text,
+                            sentence.confidence,
+                        )
                         conf_str = f" [dim](confidence: {conf:.2%})[/dim]"
                         line = f"[blue][{format_timestamp(start)} --> {format_timestamp(end)}][/blue]{conf_str} {text.strip()}"
                         print(line)

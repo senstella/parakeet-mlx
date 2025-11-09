@@ -48,15 +48,24 @@ class AlignedResult:
         return [token for sentence in self.sentences for token in sentence.tokens]
 
 
-def tokens_to_sentences(tokens: list[AlignedToken]) -> list[AlignedSentence]:
+@dataclass
+class SentenceConfig:
+    max_words: int | None = None
+    silence_gap: float | None = None
+    max_duration: float | None = None
+
+
+def tokens_to_sentences(
+    tokens: list[AlignedToken], config: SentenceConfig = SentenceConfig()
+) -> list[AlignedSentence]:
     sentences = []
-    current_tokens = []
+    current_tokens: list[AlignedToken] = []
 
     for idx, token in enumerate(tokens):
         current_tokens.append(token)
 
-        # hacky, will fix
-        if (
+        is_punctuation = (
+            # hacky, will fix
             "!" in token.text
             or "?" in token.text
             or "。" in token.text
@@ -66,7 +75,26 @@ def tokens_to_sentences(tokens: list[AlignedToken]) -> list[AlignedSentence]:
                 "." in token.text
                 and (idx == len(tokens) - 1 or " " in tokens[idx + 1].text)
             )
-        ):  # type: ignore
+        )
+        is_word_limit = (
+            (config.max_words is not None)
+            and (idx != len(tokens) - 1)
+            and (
+                len([x for x in current_tokens if " " in x.text])
+                + (1 if " " in tokens[idx + 1].text else 0)
+                > config.max_words
+            )
+        )
+        is_long_silence = (
+            (config.silence_gap is not None)
+            and (idx != len(tokens) - 1)
+            and (tokens[idx + 1].start - token.end >= config.silence_gap)
+        )
+        is_over_duration = (config.max_duration is not None) and (
+            token.end - current_tokens[0].start >= config.max_duration
+        )
+
+        if is_punctuation or is_word_limit or is_long_silence or is_over_duration:
             sentence_text = "".join(t.text for t in current_tokens)
             sentence = AlignedSentence(text=sentence_text, tokens=current_tokens)
             sentences.append(sentence)

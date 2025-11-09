@@ -39,6 +39,7 @@ parakeet-mlx <audio_files> [OPTIONS]
 
 - `--model` (default: `mlx-community/parakeet-tdt-0.6b-v3`, env: `PARAKEET_MODEL`)
   - Hugging Face repository of the model to use
+  - https://huggingface.co/collections/mlx-community/parakeet
 
 - `--output-dir` (default: current directory)
   - Directory to save transcription outputs
@@ -60,6 +61,15 @@ parakeet-mlx <audio_files> [OPTIONS]
 
 - `--overlap-duration` (default: 15 seconds, env: `PARAKEET_OVERLAP_DURATION`)
   - Overlap duration in seconds if using chunking
+
+- `--max-words` (default: None, env: `PARAKEET_MAX_WORDS`)
+  - Max words per sentence
+
+- `--silence-gap` (default: None, env: `PARAKEET_SILENCE_GAP`)
+  - Split sentence if it exceeds silence gap provided (seconds)
+
+- `--max-duration` (default: None, env: `PARAKEET_MAX_DURATION`)
+  - Max sentence duration (seconds)
 
 - `--fp32` / `--bf16` (default: `bf16`, env: `PARAKEET_FP32` - boolean)
   - Determine the precision to use
@@ -144,6 +154,25 @@ result = model.transcribe("audio_file.wav")
 print(result.sentences)
 ```
 
+Specifiy the sentence split options:
+
+```py
+from parakeet_mlx import from_pretrained, DecodingConfig, SentenceConfig
+
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+
+config = DecodingConfig(
+    sentence = SentenceConfig(
+        # Refer to CLI Options to see what those options does
+        max_words=30, silence_gap=5.0, max_duration=40.0
+    )
+)
+
+result = model.transcribe("audio_file.wav", decoding_config=config)
+
+print(result.sentences)
+```
+
 ## from_pretrained
 
 Using `from_pretrained` downloads a model from Hugging Face and stores the downloaded model in HF's [cache folder](https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache). You can specify the cache folder by passing it `cache_dir` args. It can return one of those Parakeet variants such as: `ParakeetTDT`, `ParakeetRNNT`, `ParakeetCTC`, or `ParakeetTDTCTC`. For general use cases, the `BaseParakeet` abstraction often suffices. However, if you want to call variant-specific functions like `.decode()` and want linters not to complain, `typing.cast` can be used.
@@ -223,6 +252,7 @@ To transcribe log-mel spectrum directly, you can do the following:
 ```python
 import mlx.core as mx
 from parakeet_mlx.audio import get_logmel, load_audio
+from parakeet_mlx import DecodingConfig
 
 # Load and preprocess audio manually
 audio = load_audio("audio.wav", model.preprocessor_config.sample_rate)
@@ -231,7 +261,7 @@ mel = get_logmel(audio, model.preprocessor_config)
 # Generate transcription with alignments
 # Accepts both [batch, sequence, feat] and [sequence, feat]
 # `alignments` is list of AlignedResult. (no matter if you fed batch dimension or not!)
-alignments = model.generate(mel)
+alignments = model.generate(mel, decoding_config=DecodingConfig())
 ```
 
 ## Todo
