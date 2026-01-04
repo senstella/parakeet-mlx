@@ -6,7 +6,9 @@ from parakeet_mlx.alignment import (
 )
 from parakeet_mlx.parakeet import (
     BaseParakeet,
+    Beam,
     DecodingConfig,
+    Greedy,
     ParakeetCTC,
     ParakeetCTCArgs,
     ParakeetRNNT,
@@ -22,6 +24,8 @@ from parakeet_mlx.utils import from_pretrained
 __all__ = [
     "DecodingConfig",
     "SentenceConfig",
+    "Beam",
+    "Greedy",
     "ParakeetTDTArgs",
     "ParakeetTDT",
     "ParakeetRNNT",
