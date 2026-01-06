@@ -1,7 +1,7 @@
 import datetime
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import typer
 from mlx.core import bfloat16, float32
@@ -17,7 +17,7 @@ from typing_extensions import Annotated
 
 from parakeet_mlx import AlignedResult, AlignedSentence, AlignedToken, from_pretrained
 from parakeet_mlx.alignment import SentenceConfig
-from parakeet_mlx.parakeet import DecodingConfig
+from parakeet_mlx.parakeet import Beam, DecodingConfig, Greedy
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -210,6 +210,13 @@ def transcribe(
         bool,
         typer.Option(help="Underline/timestamp each word as it is spoken in srt/vtt"),
     ] = False,
+    decoding: Annotated[
+        Literal["greedy", "beam"],
+        typer.Option(
+            help="Decoding method to use",
+            envvar="PARAKEET_DECODING",
+        ),
+    ] = "greedy",
     chunk_duration: Annotated[
         float,
         typer.Option(
@@ -224,6 +231,34 @@ def transcribe(
             envvar="PARAKEET_OVERLAP_DURATION",
         ),
     ] = 15,
+    beam_size: Annotated[
+        int,
+        typer.Option(
+            help="Beam size (only used while beam decoding)",
+            envvar="PARAKEET_BEAM_SIZE",
+        ),
+    ] = 5,
+    length_penalty: Annotated[
+        float,
+        typer.Option(
+            help="Length penalty in beam. 0.0 to disable (only used while beam decoding)",
+            envvar="PARAKEET_LENGTH_PENALTY",
+        ),
+    ] = 0.013,
+    patience: Annotated[
+        float,
+        typer.Option(
+            help="Patience in beam. 1.0 to disable (only used while beam decoding)",
+            envvar="PARAKEET_PATIENCE",
+        ),
+    ] = 3.5,
+    duration_reward: Annotated[
+        float,
+        typer.Option(
+            help="From 0.0 to 1.0, < 0.5 to favor token logprobs more, > 0.5 to favor duration logprobs more. (only used while beam decoding in TDT)",
+            envvar="PARAKEET_DURATION_REWARD",
+        ),
+    ] = 0.67,
     max_words: Annotated[
         Optional[int],
         typer.Option(
@@ -339,9 +374,17 @@ def transcribe(
         print(f"Transcribing {total_files} file(s)...")
 
     decoding_config = DecodingConfig(
+        decoding=Beam(
+            beam_size=beam_size,
+            length_penalty=length_penalty,
+            patience=patience,
+            duration_reward=duration_reward,
+        )
+        if decoding == "beam"
+        else Greedy(),
         sentence=SentenceConfig(
             max_words=max_words, silence_gap=silence_gap, max_duration=max_duration
-        )
+        ),
     )
 
     with Progress(
