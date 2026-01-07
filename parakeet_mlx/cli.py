@@ -386,6 +386,8 @@ def transcribe(
             max_words=max_words, silence_gap=silence_gap, max_duration=max_duration
         ),
     )
+    if verbose:
+        print("Decoding config being used:", decoding_config)
 
     with Progress(
         SpinnerColumn(),
