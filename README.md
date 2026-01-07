@@ -56,11 +56,27 @@ parakeet-mlx <audio_files> [OPTIONS]
 - `--verbose` / `-v` (default: False)
   - Print detailed progress information
 
+- `--decoding` (default: `greedy`, env: `PARAKEET_DECODING`)
+  - Decoding method to use (`greedy` or `beam`)
+  - `beam` is only available at TDT models for now
+
 - `--chunk-duration` (default: 120 seconds, env: `PARAKEET_CHUNK_DURATION`)
   - Chunking duration in seconds for long audio, `0` to disable chunking
 
 - `--overlap-duration` (default: 15 seconds, env: `PARAKEET_OVERLAP_DURATION`)
   - Overlap duration in seconds if using chunking
+
+- `--beam-size` (default: 5, env: `PARAKEET_BEAM_SIZE`)
+  - Beam size (only used while beam decoding)
+
+- `--length-penalty` (default: 0.013, env: `PARAKEET_LENGTH_PENALTY`)
+  - Length penalty in beam. 0.0 to disable (only used while beam decoding)
+
+- `--patience` (default: 3.5, env: `PARAKEET_PATIENCE`)
+  - Patience in beam. 1.0 to disable (only used while beam decoding)
+
+- `--duration-reward` (default: 0.67, env: `PARAKEET_DURATION_REWARD`)
+  - From 0.0 to 1.0, < 0.5 to favor token logprobs more, > 0.5 to favor duration logprobs more. (only used while beam decoding in TDT)
 
 - `--max-words` (default: None, env: `PARAKEET_MAX_WORDS`)
   - Max words per sentence
@@ -133,6 +149,25 @@ from parakeet_mlx import from_pretrained
 model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
 
 result = model.transcribe("audio_file.wav", chunk_duration=60 * 2.0, overlap_duration=15.0)
+
+print(result.sentences)
+```
+
+Do beam decoding:
+
+```py
+from parakeet_mlx import from_pretrained, DecodingConfig, Beam
+
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+
+config = DecodingConfig(
+    decoding = decoding(
+        beam_size=5, length_penalty=0.013, patience=3.5, duration_reward=0.67
+        # Refer to CLI options for each parameters 
+    )
+)
+
+result = model.transcribe("audio_file.wav", decoding_config=config)
 
 print(result.sentences)
 ```
