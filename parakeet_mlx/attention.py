@@ -108,7 +108,14 @@ class RelPositionMultiHeadAttention(MultiHeadAttention):
 
         batch, q_seq, _ = q.shape
         _, k_seq, _ = k.shape
-        _, pos_len, _ = p.shape
+        p_batch, pos_len, _ = p.shape
+
+        if p_batch == 1 and batch > 1:
+            p = mx.broadcast_to(p, (batch, pos_len, p.shape[-1]))
+        elif p_batch != batch:
+            raise ValueError(
+                f"pos_emb batch ({p_batch}) must be 1 or match query batch ({batch})"
+            )
 
         q = q.reshape(batch, q_seq, self.n_head, self.head_dim)
         q_u = (q + self.pos_bias_u).transpose(0, 2, 1, 3)
@@ -176,7 +183,14 @@ class RelPositionMultiHeadLocalAttention(RelPositionMultiHeadAttention):
 
         batch, q_seq, _ = q.shape
         _, k_seq, _ = k.shape
-        _, pos_len, _ = p.shape
+        p_batch, pos_len, _ = p.shape
+
+        if p_batch == 1 and batch > 1:
+            p = mx.broadcast_to(p, (batch, pos_len, p.shape[-1]))
+        elif p_batch != batch:
+            raise ValueError(
+                f"pos_emb batch ({p_batch}) must be 1 or match query batch ({batch})"
+            )
 
         q = q.reshape(batch, q_seq, self.n_head, self.head_dim).transpose(0, 2, 1, 3)
         k = k.reshape(batch, k_seq, self.n_head, self.head_dim).transpose(0, 2, 1, 3)
