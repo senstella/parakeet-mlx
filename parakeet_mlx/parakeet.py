@@ -11,6 +11,7 @@ from parakeet_mlx import tokenizer
 from parakeet_mlx.alignment import (
     AlignedResult,
     AlignedToken,
+    NBestHypothesis,
     SentenceConfig,
     merge_longest_common_subsequence,
     merge_longest_contiguous,
@@ -81,6 +82,7 @@ class Greedy:
 @dataclass
 class Beam:
     beam_size: int = 5
+    n_best: int = 1  # Number of hypotheses to return
     length_penalty: float = 1.0
     patience: float = 1.0
     duration_reward: float = 0.7  # TDT-only
@@ -292,15 +294,20 @@ class ParakeetTDT(BaseParakeet):
         hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
         *,
         config: DecodingConfig = DecodingConfig(),
-    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
+    ) -> tuple[
+        list[list[AlignedToken]],
+        list[list[NBestHypothesis]] | None,
+        list[Optional[tuple[mx.array, mx.array]]],
+    ]:
         """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
         mx.eval(features)
 
         match config.decoding:
             case Greedy():
-                return self.decode_greedy(
+                tokens, hidden = self.decode_greedy(
                     features, lengths, last_token, hidden_state, config=config
                 )
+                return tokens, None, hidden
             case Beam():
                 return self.decode_beam(
                     features, lengths, last_token, hidden_state, config=config
@@ -318,7 +325,11 @@ class ParakeetTDT(BaseParakeet):
         hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
         *,
         config: DecodingConfig = DecodingConfig(),
-    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
+    ) -> tuple[
+        list[list[AlignedToken]],
+        list[list[NBestHypothesis]],
+        list[Optional[tuple[mx.array, mx.array]]],
+    ]:
         assert isinstance(config.decoding, Beam)  # type guarntee
 
         beam_token = min(config.decoding.beam_size, len(self.vocabulary) + 1)
@@ -348,7 +359,10 @@ class ParakeetTDT(BaseParakeet):
         if last_token is None:
             last_token = list([None] * B)
 
+        n_best = config.decoding.n_best
+
         results = []
+        results_nbest = []
         results_hidden = []
         for batch in range(B):
             feature = features[batch : batch + 1]
@@ -507,21 +521,47 @@ class ParakeetTDT(BaseParakeet):
 
             if not finished_hypothesis:
                 results.append([])
+                results_nbest.append([])
                 results_hidden.append(hidden_state[batch])
             else:
                 length_penalty = (
                     config.decoding.length_penalty
                 )  # mypy assumes weirdly so we go in safe way
 
-                best = max(
+                # Sort hypotheses by normalized score
+                sorted_hyps = sorted(
                     finished_hypothesis,
                     key=lambda x: x.score
                     / (max(1, len(x.hypothesis)) ** length_penalty),
+                    reverse=True,
                 )
+
+                # Get the best hypothesis for backward compatibility
+                best = sorted_hyps[0]
                 results.append(best.hypothesis)
                 results_hidden.append(best.hidden_state)
 
-        return results, results_hidden
+                # Build N-best hypotheses list
+                n_best_hyps = []
+                for hyp in sorted_hyps[:n_best]:
+                    hyp_text = "".join(
+                        token.text for token in hyp.hypothesis
+                    ).strip()
+                    hyp_len = max(1, len(hyp.hypothesis))
+                    normalized_score = hyp.score / hyp_len
+                    confidence = math.exp(normalized_score)
+                    # Clamp confidence to [0, 1] range
+                    confidence = min(1.0, max(0.0, confidence))
+                    n_best_hyps.append(
+                        NBestHypothesis(
+                            text=hyp_text,
+                            score=hyp.score,
+                            confidence=confidence,
+                        )
+                    )
+                results_nbest.append(n_best_hyps)
+
+        return results, results_nbest, results_hidden
 
     def decode_greedy(
         self,
@@ -626,14 +666,21 @@ class ParakeetTDT(BaseParakeet):
         features, lengths = self.encoder(mel)
         mx.eval(features, lengths)
 
-        result, _ = self.decode(features, lengths, config=decoding_config)
+        tokens_result, nbest_result, _ = self.decode(
+            features, lengths, config=decoding_config
+        )
 
-        return [
-            sentences_to_result(
+        results = []
+        for i, hypothesis in enumerate(tokens_result):
+            aligned_result = sentences_to_result(
                 tokens_to_sentences(hypothesis, decoding_config.sentence)
             )
-            for hypothesis in result
-        ]
+            # Add N-best hypotheses if available (beam search)
+            if nbest_result is not None and i < len(nbest_result):
+                aligned_result.hypotheses = nbest_result[i]
+            results.append(aligned_result)
+
+        return results
 
 
 class ParakeetRNNT(BaseParakeet):
@@ -660,8 +707,12 @@ class ParakeetRNNT(BaseParakeet):
         hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
         *,
         config: DecodingConfig = DecodingConfig(),
-    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
-        """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
+    ) -> tuple[
+        list[list[AlignedToken]],
+        list[list[NBestHypothesis]] | None,
+        list[Optional[tuple[mx.array, mx.array]]],
+    ]:
+        """Run RNNT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
         assert isinstance(config.decoding, Greedy), (
             "Only greedy decoding is supported for RNNT decoder now"
         )
@@ -740,7 +791,7 @@ class ParakeetRNNT(BaseParakeet):
 
             results.append(hypothesis)
 
-        return results, hidden_state
+        return results, None, hidden_state
 
     def generate(
         self, mel: mx.array, *, decoding_config: DecodingConfig = DecodingConfig()
@@ -751,14 +802,21 @@ class ParakeetRNNT(BaseParakeet):
         features, lengths = self.encoder(mel)
         mx.eval(features, lengths)
 
-        result, _ = self.decode(features, lengths, config=decoding_config)
+        tokens_result, nbest_result, _ = self.decode(
+            features, lengths, config=decoding_config
+        )
 
-        return [
-            sentences_to_result(
+        results = []
+        for i, hypothesis in enumerate(tokens_result):
+            aligned_result = sentences_to_result(
                 tokens_to_sentences(hypothesis, decoding_config.sentence)
             )
-            for hypothesis in result
-        ]
+            # Add N-best hypotheses if available
+            if nbest_result is not None and i < len(nbest_result):
+                aligned_result.hypotheses = nbest_result[i]
+            results.append(aligned_result)
+
+        return results
 
 
 class ParakeetCTC(BaseParakeet):
@@ -1059,7 +1117,7 @@ class StreamingParakeet:
         finalized_length = max(0, length - self.drop_size)
 
         if isinstance(self.model, ParakeetTDT) or isinstance(self.model, ParakeetRNNT):
-            finalized_tokens, finalized_state = self.model.decode(
+            finalized_tokens, _, finalized_state = self.model.decode(
                 features,
                 mx.array([finalized_length]),
                 [self.last_token],
@@ -1072,7 +1130,7 @@ class StreamingParakeet:
                 finalized_tokens[0][-1].id if len(finalized_tokens[0]) > 0 else None
             )
 
-            draft_tokens, _ = self.model.decode(
+            draft_tokens, _, _ = self.model.decode(
                 features[:, finalized_length:],
                 mx.array(
                     [

@@ -161,15 +161,33 @@ from parakeet_mlx import from_pretrained, DecodingConfig, Beam
 model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
 
 config = DecodingConfig(
-    decoding = decoding(
+    decoding = Beam(
         beam_size=5, length_penalty=0.013, patience=3.5, duration_reward=0.67
-        # Refer to CLI options for each parameters 
+        # Refer to CLI options for each parameters
     )
 )
 
 result = model.transcribe("audio_file.wav", decoding_config=config)
 
 print(result.sentences)
+```
+
+Get N-best hypotheses with beam decoding:
+
+```py
+from parakeet_mlx import from_pretrained, DecodingConfig, Beam
+
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+
+config = DecodingConfig(
+    decoding = Beam(beam_size=5, n_best=3)
+)
+
+result = model.transcribe("audio_file.wav", decoding_config=config)
+
+# Access N-best hypotheses
+for hyp in result.hypotheses:
+    print(f"Text: {hyp.text}, Score: {hyp.score:.2f}, Confidence: {hyp.confidence:.2f}")
 ```
 
 Use local attention:
@@ -217,6 +235,11 @@ Using `from_pretrained` downloads a model from Hugging Face and stores the downl
 - `AlignedResult`: Top-level result containing the full text and sentences
   - `text`: Full transcribed text
   - `sentences`: List of `AlignedSentence`
+  - `hypotheses`: List of `NBestHypothesis` (only with beam decoding and `n_best > 1`)
+- `NBestHypothesis`: Alternative hypotheses from beam search
+  - `text`: Hypothesis text
+  - `score`: Log probability score
+  - `confidence`: Confidence score (0.0 to 1.0)
 - `AlignedSentence`: Sentence-level alignments with start/end times
   - `text`: Sentence text
   - `start`: Start time in seconds

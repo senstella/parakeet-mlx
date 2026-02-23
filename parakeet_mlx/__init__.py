@@ -2,6 +2,7 @@ from parakeet_mlx.alignment import (
     AlignedResult,
     AlignedSentence,
     AlignedToken,
+    NBestHypothesis,
     SentenceConfig,
 )
 from parakeet_mlx.parakeet import (
@@ -40,4 +41,5 @@ __all__ = [
     "AlignedResult",
     "AlignedSentence",
     "AlignedToken",
+    "NBestHypothesis",
 ]
