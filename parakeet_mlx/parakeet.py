@@ -302,14 +302,40 @@ class ParakeetTDT(BaseParakeet):
         last_token: Optional[list[Optional[int]]] = None,
         hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
         *,
+        language_token: Optional[list[Optional[int]]] = None,
         config: DecodingConfig = DecodingConfig(),
     ) -> tuple[
         list[list[AlignedToken]],
         list[list[NBestHypothesis]] | None,
         list[Optional[tuple[mx.array, mx.array]]],
     ]:
-        """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
+        """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state.
+
+        Args:
+            language_token: Optional per-batch language token IDs (e.g. [71] for French).
+                When provided, the LSTM prediction network is primed with the language
+                token embedding to bias decoding toward that language. The token is NOT
+                fed as input during actual decoding — only its hidden state is carried over.
+        """
         mx.eval(features)
+
+        # Language token warmup: prime the LSTM hidden state with the language token
+        # so the decoder is biased toward the target language without truncating
+        # the first decoded word.
+        if language_token is not None:
+            B = features.shape[0]
+            if hidden_state is None:
+                hidden_state = list([None] * B)
+            for i, lang_tok in enumerate(language_token):
+                if lang_tok is not None:
+                    _, primed_state = self.decoder(
+                        mx.array([[lang_tok]]),
+                        hidden_state[i],
+                    )
+                    hidden_state[i] = (
+                        primed_state[0].astype(features.dtype),
+                        primed_state[1].astype(features.dtype),
+                    )
 
         match config.decoding:
             case Greedy():
@@ -876,6 +902,7 @@ class ParakeetRNNT(BaseParakeet):
         last_token: Optional[list[Optional[int]]] = None,
         hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
         *,
+        language_token: Optional[list[Optional[int]]] = None,
         config: DecodingConfig = DecodingConfig(),
     ) -> tuple[
         list[list[AlignedToken]],
@@ -891,6 +918,19 @@ class ParakeetRNNT(BaseParakeet):
 
         if hidden_state is None:
             hidden_state = list([None] * B)
+
+        # Language token warmup (same as ParakeetTDT.decode)
+        if language_token is not None:
+            for i, lang_tok in enumerate(language_token):
+                if lang_tok is not None:
+                    _, primed_state = self.decoder(
+                        mx.array([[lang_tok]]),
+                        hidden_state[i],
+                    )
+                    hidden_state[i] = (
+                        primed_state[0].astype(features.dtype),
+                        primed_state[1].astype(features.dtype),
+                    )
 
         if lengths is None:
             lengths = mx.array([S] * B)
