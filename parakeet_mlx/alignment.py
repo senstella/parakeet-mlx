@@ -113,6 +113,60 @@ def sentences_to_result(sentences: list[AlignedSentence]) -> AlignedResult:
     return AlignedResult("".join(sentence.text for sentence in sentences), sentences)
 
 
+def _is_time_ordered(tokens: list[AlignedToken]) -> bool:
+    return all(tokens[i].start <= tokens[i + 1].start for i in range(len(tokens) - 1))
+
+
+def _merge_at_cutoff(a: list[AlignedToken], b: list[AlignedToken]) -> list[AlignedToken]:
+    if not a or not b:
+        return b if not a else a
+
+    cutoff_time = (a[-1].end + b[0].start) / 2
+    return [t for t in a if t.end <= cutoff_time] + [
+        t for t in b if t.start >= cutoff_time
+    ]
+
+
+def _append_time_ordered(
+    result: list[AlignedToken], tokens: list[AlignedToken]
+) -> None:
+    for token in tokens:
+        if not result or result[-1].start <= token.start:
+            result.append(token)
+
+
+def _append_aligned_token(
+    result: list[AlignedToken], token_a: AlignedToken, token_b: AlignedToken
+) -> None:
+    if not result or result[-1].start <= token_a.start:
+        result.append(token_a)
+    elif result[-1].start <= token_b.start:
+        result.append(token_b)
+
+
+def _merge_from_pairs(
+    a: list[AlignedToken], b: list[AlignedToken], pairs: list[tuple[int, int]]
+) -> list[AlignedToken]:
+    result = []
+    _append_time_ordered(result, a[: pairs[0][0]])
+
+    for idx, (idx_a, idx_b) in enumerate(pairs):
+        _append_aligned_token(result, a[idx_a], b[idx_b])
+
+        if idx == len(pairs) - 1:
+            continue
+
+        next_a, next_b = pairs[idx + 1]
+        gap_tokens_a = a[idx_a + 1 : next_a]
+        gap_tokens_b = b[idx_b + 1 : next_b]
+        _append_time_ordered(
+            result, gap_tokens_b if len(gap_tokens_b) > len(gap_tokens_a) else gap_tokens_a
+        )
+
+    _append_time_ordered(result, b[pairs[-1][1] + 1 :])
+    return result if _is_time_ordered(result) else _merge_at_cutoff(a, b)
+
+
 def merge_longest_contiguous(
     a: list[AlignedToken],
     b: list[AlignedToken],
@@ -134,10 +188,7 @@ def merge_longest_contiguous(
     enough_pairs = len(overlap_a) // 2
 
     if len(overlap_a) < 2 or len(overlap_b) < 2:
-        cutoff_time = (a_end_time + b_start_time) / 2
-        return [t for t in a if t.end <= cutoff_time] + [
-            t for t in b if t.start >= cutoff_time
-        ]
+        return _merge_at_cutoff(a, b)
 
     best_contiguous = []
     for i in range(len(overlap_a)):
@@ -164,32 +215,8 @@ def merge_longest_contiguous(
 
     if len(best_contiguous) >= enough_pairs:
         a_start_idx = len(a) - len(overlap_a)
-        lcs_indices_a = [a_start_idx + pair[0] for pair in best_contiguous]
-        lcs_indices_b = [pair[1] for pair in best_contiguous]
-
-        result = []
-        result.extend(a[: lcs_indices_a[0]])
-
-        for i in range(len(best_contiguous)):
-            idx_a = lcs_indices_a[i]
-            idx_b = lcs_indices_b[i]
-
-            result.append(a[idx_a])
-
-            if i < len(best_contiguous) - 1:
-                next_idx_a = lcs_indices_a[i + 1]
-                next_idx_b = lcs_indices_b[i + 1]
-
-                gap_tokens_a = a[idx_a + 1 : next_idx_a]
-                gap_tokens_b = b[idx_b + 1 : next_idx_b]
-
-                if len(gap_tokens_b) > len(gap_tokens_a):
-                    result.extend(gap_tokens_b)
-                else:
-                    result.extend(gap_tokens_a)
-
-        result.extend(b[lcs_indices_b[-1] + 1 :])
-        return result
+        pairs = [(a_start_idx + pair[0], pair[1]) for pair in best_contiguous]
+        return _merge_from_pairs(a, b, pairs)
     else:
         raise RuntimeError(f"No pairs exceeding {enough_pairs}")
 
@@ -213,10 +240,7 @@ def merge_longest_common_subsequence(
     overlap_b = [token for token in b if token.start < a_end_time + overlap_duration]
 
     if len(overlap_a) < 2 or len(overlap_b) < 2:
-        cutoff_time = (a_end_time + b_start_time) / 2
-        return [t for t in a if t.end <= cutoff_time] + [
-            t for t in b if t.start >= cutoff_time
-        ]
+        return _merge_at_cutoff(a, b)
 
     dp = [[0 for _ in range(len(overlap_b) + 1)] for _ in range(len(overlap_a) + 1)]
 
@@ -251,37 +275,8 @@ def merge_longest_common_subsequence(
     lcs_pairs.reverse()
 
     if not lcs_pairs:
-        cutoff_time = (a_end_time + b_start_time) / 2
-        return [t for t in a if t.end <= cutoff_time] + [
-            t for t in b if t.start >= cutoff_time
-        ]
+        return _merge_at_cutoff(a, b)
 
     a_start_idx = len(a) - len(overlap_a)
-    lcs_indices_a = [a_start_idx + pair[0] for pair in lcs_pairs]
-    lcs_indices_b = [pair[1] for pair in lcs_pairs]
-
-    result = []
-
-    result.extend(a[: lcs_indices_a[0]])
-
-    for i in range(len(lcs_pairs)):
-        idx_a = lcs_indices_a[i]
-        idx_b = lcs_indices_b[i]
-
-        result.append(a[idx_a])
-
-        if i < len(lcs_pairs) - 1:
-            next_idx_a = lcs_indices_a[i + 1]
-            next_idx_b = lcs_indices_b[i + 1]
-
-            gap_tokens_a = a[idx_a + 1 : next_idx_a]
-            gap_tokens_b = b[idx_b + 1 : next_idx_b]
-
-            if len(gap_tokens_b) > len(gap_tokens_a):
-                result.extend(gap_tokens_b)
-            else:
-                result.extend(gap_tokens_a)
-
-    result.extend(b[lcs_indices_b[-1] + 1 :])
-
-    return result
+    pairs = [(a_start_idx + pair[0], pair[1]) for pair in lcs_pairs]
+    return _merge_from_pairs(a, b, pairs)
