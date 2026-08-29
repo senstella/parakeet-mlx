@@ -238,21 +238,26 @@ class BaseParakeet(nn.Module):
 
         mels = []
         expected_shape = None
-        for path in paths:
+        for index, path in enumerate(paths):
+            audio_path = Path(path)
             audio_data = load_audio(
-                Path(path), self.preprocessor_config.sample_rate, dtype
+                audio_path, self.preprocessor_config.sample_rate, dtype
             )
             if audio_data.shape[0] < self.preprocessor_config.hop_length:
                 raise ValueError(
-                    "transcribe_batch requires decoded audio with at least one hop."
+                    f"transcribe_batch index {index} path {audio_path} decoded "
+                    f"{audio_data.shape[0]} samples; expected at least "
+                    f"{self.preprocessor_config.hop_length}."
                 )
 
+            audio_data = audio_data.astype(dtype)
             mel = get_logmel(audio_data, self.preprocessor_config)
             if expected_shape is None:
                 expected_shape = mel.shape
             elif mel.shape != expected_shape:
                 raise ValueError(
-                    "transcribe_batch requires every log-mel tensor to have the same shape."
+                    f"transcribe_batch index {index} path {audio_path} has log-mel "
+                    f"shape {mel.shape}; expected {expected_shape}."
                 )
             mels.append(mel)
 

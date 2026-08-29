@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import mlx.core as mx
+import numpy as np
 import pytest
 
 from parakeet_mlx.alignment import AlignedResult
@@ -82,9 +83,13 @@ def test_transcribe_batch_rejects_unequal_logmel_shapes_before_generate(monkeypa
         lambda *args, **kwargs: generate_calls.append((args, kwargs)),
     )
 
-    with pytest.raises(ValueError, match="same shape"):
+    with pytest.raises(ValueError) as error:
         model.transcribe_batch(["first.wav", "second.wav"])
 
+    assert str(error.value) == (
+        "transcribe_batch index 1 path second.wav has log-mel shape (1, 4, 2); "
+        "expected (1, 3, 2)."
+    )
     assert generate_calls == []
 
 
@@ -111,9 +116,13 @@ def test_transcribe_batch_rejects_audio_shorter_than_one_hop_before_logmel(
         lambda *args, **kwargs: generate_calls.append((args, kwargs)),
     )
 
-    with pytest.raises(ValueError, match="at least one hop"):
+    with pytest.raises(ValueError) as error:
         model.transcribe_batch(["short.wav"])
 
+    assert str(error.value) == (
+        f"transcribe_batch index 0 path short.wav decoded {sample_count} samples; "
+        "expected at least 160."
+    )
     assert preprocess_calls == []
     assert generate_calls == []
 
@@ -122,3 +131,35 @@ def test_transcribe_batch_rejects_an_empty_path_list():
     """Catches an empty request reaching concatenation or generation."""
     with pytest.raises(ValueError, match="at least one path"):
         make_model().transcribe_batch([])
+
+
+def test_transcribe_batch_casts_real_loaded_audio_to_the_requested_dtype(monkeypatch):
+    """Catches the real audio helper's float32 return bypassing the batch dtype option."""
+    model = make_model()
+    dtype = mx.bfloat16
+    preprocessed_dtypes = []
+    generated = []
+
+    monkeypatch.setattr("parakeet_mlx.audio.shutil.which", lambda _: "ffmpeg")
+    monkeypatch.setattr(
+        "parakeet_mlx.audio.run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout=np.ones(320, dtype=np.int16).tobytes()
+        ),
+    )
+
+    def fake_get_logmel(audio, preprocess_config):
+        preprocessed_dtypes.append(audio.dtype)
+        return mx.ones((1, 3, 2), dtype=audio.dtype)
+
+    def fake_generate(mel, *, decoding_config):
+        generated.append(mel)
+        return [AlignedResult("audio.wav", [])]
+
+    monkeypatch.setattr("parakeet_mlx.parakeet.get_logmel", fake_get_logmel)
+    object.__setattr__(model, "generate", fake_generate)
+
+    model.transcribe_batch(["audio.wav"], dtype=dtype)
+
+    assert preprocessed_dtypes == [dtype]
+    assert generated[0].dtype == dtype
