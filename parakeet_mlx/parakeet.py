@@ -163,6 +163,12 @@ class BaseParakeet(nn.Module):
         """
         audio_path = Path(path)
         audio_data = load_audio(audio_path, self.preprocessor_config.sample_rate, dtype)
+        minimum_samples = self.preprocessor_config.hop_length
+        if len(audio_data) < minimum_samples:
+            raise ValueError(
+                f"Audio must contain at least {minimum_samples} decoded samples; "
+                f"got {len(audio_data)} from {audio_path}"
+            )
 
         if chunk_duration is None:
             mel = get_logmel(audio_data, self.preprocessor_config)
