@@ -220,6 +220,44 @@ class BaseParakeet(nn.Module):
         )
         return result
 
+    def transcribe_batch(
+        self,
+        paths: list[Path | str],
+        *,
+        dtype: mx.Dtype = mx.bfloat16,
+        decoding_config: DecodingConfig = DecodingConfig(),
+    ) -> list[AlignedResult]:
+        """Transcribe equal-length, non-chunked audio files in one model batch.
+
+        Each path is decoded and converted to log-mel features independently.
+        Every resulting tensor must have the same shape; variable-length input is
+        rejected instead of padded or chunked.
+        """
+        if not paths:
+            raise ValueError("transcribe_batch requires at least one path.")
+
+        mels = []
+        expected_shape = None
+        for path in paths:
+            audio_data = load_audio(
+                Path(path), self.preprocessor_config.sample_rate, dtype
+            )
+            if audio_data.shape[0] < self.preprocessor_config.hop_length:
+                raise ValueError(
+                    "transcribe_batch requires decoded audio with at least one hop."
+                )
+
+            mel = get_logmel(audio_data, self.preprocessor_config)
+            if expected_shape is None:
+                expected_shape = mel.shape
+            elif mel.shape != expected_shape:
+                raise ValueError(
+                    "transcribe_batch requires every log-mel tensor to have the same shape."
+                )
+            mels.append(mel)
+
+        return self.generate(mx.concatenate(mels, axis=0), decoding_config=decoding_config)
+
     def transcribe_stream(
         self,
         context_size: tuple[int, int] = (256, 256),
