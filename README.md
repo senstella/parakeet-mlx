@@ -161,7 +161,7 @@ from parakeet_mlx import from_pretrained, DecodingConfig, Beam
 model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
 
 config = DecodingConfig(
-    decoding = decoding(
+    decoding = Beam(
         beam_size=5, length_penalty=0.013, patience=3.5, duration_reward=0.67
         # Refer to CLI options for each parameters 
     )
