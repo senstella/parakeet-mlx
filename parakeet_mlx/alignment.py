@@ -114,9 +114,6 @@ def sentences_to_result(sentences: list[AlignedSentence]) -> AlignedResult:
 
 
 def _force_monotonic(tokens: list[AlignedToken]) -> list[AlignedToken]:
-    # merged tokens are in the right order, but ones taken from different chunks
-    # can have timestamps that go backwards, and AlignedSentence sorts by start.
-    # force-align such a token to its predecessor instead of dropping it.
     result = tokens[:1]
     for token in tokens[1:]:
         prev = result[-1]
