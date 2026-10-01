@@ -36,9 +36,19 @@ class AlignedSentence:
 
 
 @dataclass
+class NBestHypothesis:
+    """Represents a single hypothesis from N-best beam search decoding."""
+
+    text: str
+    score: float
+    confidence: float
+
+
+@dataclass
 class AlignedResult:
     text: str
     sentences: list[AlignedSentence]
+    hypotheses: list[NBestHypothesis] | None = None  # N-best hypotheses from beam search
 
     def __post_init__(self) -> None:
         self.text = self.text.strip()
