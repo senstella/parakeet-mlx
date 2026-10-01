@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -113,6 +113,18 @@ def sentences_to_result(sentences: list[AlignedSentence]) -> AlignedResult:
     return AlignedResult("".join(sentence.text for sentence in sentences), sentences)
 
 
+def _force_monotonic(tokens: list[AlignedToken]) -> list[AlignedToken]:
+    result = tokens[:1]
+    for token in tokens[1:]:
+        prev = result[-1]
+        if token.start < prev.start:
+            token = replace(
+                token, start=prev.end, duration=max(0.0, token.end - prev.end)
+            )
+        result.append(token)
+    return result
+
+
 def merge_longest_contiguous(
     a: list[AlignedToken],
     b: list[AlignedToken],
@@ -189,7 +201,7 @@ def merge_longest_contiguous(
                     result.extend(gap_tokens_a)
 
         result.extend(b[lcs_indices_b[-1] + 1 :])
-        return result
+        return _force_monotonic(result)
     else:
         raise RuntimeError(f"No pairs exceeding {enough_pairs}")
 
@@ -284,4 +296,4 @@ def merge_longest_common_subsequence(
 
     result.extend(b[lcs_indices_b[-1] + 1 :])
 
-    return result
+    return _force_monotonic(result)
