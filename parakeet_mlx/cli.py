@@ -1,5 +1,7 @@
 import datetime
 import json
+import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
@@ -16,13 +18,30 @@ from rich.progress import (
 from typing_extensions import Annotated
 
 from parakeet_mlx import AlignedResult, AlignedSentence, AlignedToken, from_pretrained
-from parakeet_mlx.alignment import SentenceConfig
+from parakeet_mlx.alignment import SentenceConfig, sentences_to_result
 from parakeet_mlx.parakeet import Beam, DecodingConfig, Greedy
 
 app = typer.Typer(no_args_is_help=True)
 
 
 # helpers
+# vocabulary markers that are not text: <unk>, <pad> and <|...|>
+CONTROL_TOKEN = re.compile(r"<unk>|<pad>|<\|[^|>]*\|>")
+
+
+def drop_control_tokens(result: AlignedResult) -> AlignedResult:
+    sentences = []
+    for sentence in result.sentences:
+        tokens = [
+            replace(t, text="") if CONTROL_TOKEN.fullmatch(t.text) else t
+            for t in sentence.tokens
+        ]
+        sentences.append(
+            AlignedSentence(text="".join(t.text for t in tokens), tokens=tokens)
+        )
+    return sentences_to_result(sentences)
+
+
 def format_timestamp(
     seconds: float, always_include_hours: bool = True, decimal_marker: str = ","
 ) -> str:
@@ -441,6 +460,7 @@ def transcribe(
                     ),
                     decoding_config=decoding_config,
                 )
+                result = drop_control_tokens(result)
 
                 if verbose:
                     for sentence in result.sentences:
