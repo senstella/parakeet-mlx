@@ -1020,7 +1020,7 @@ class ParakeetCTC(BaseParakeet):
                 if token_idx == len(self.vocabulary):
                     continue
 
-                if token_idx == prev_token:
+                if t > 0 and token_idx == int(best_tokens[t - 1]):
                     continue
 
                 if prev_token != -1:
@@ -1058,7 +1058,7 @@ class ParakeetCTC(BaseParakeet):
                 prev_token = token_idx
 
             if prev_token != -1:
-                last_non_blank = length - 1
+                last_non_blank = token_boundaries[-1][0]
                 for t in range(length - 1, token_boundaries[-1][0], -1):
                     if int(best_tokens[t]) != len(self.vocabulary):
                         last_non_blank = t
