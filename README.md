@@ -58,7 +58,7 @@ parakeet-mlx <audio_files> [OPTIONS]
 
 - `--decoding` (default: `greedy`, env: `PARAKEET_DECODING`)
   - Decoding method to use (`greedy` or `beam`)
-  - `beam` is only available at TDT models for now
+  - `beam` is only available at TDT/RNNT models for now
 
 - `--chunk-duration` (default: 120 seconds, env: `PARAKEET_CHUNK_DURATION`)
   - Chunking duration in seconds for long audio, `0` to disable chunking
@@ -76,7 +76,7 @@ parakeet-mlx <audio_files> [OPTIONS]
   - Patience in beam. 1.0 to disable (only used while beam decoding)
 
 - `--duration-reward` (default: 0.67, env: `PARAKEET_DURATION_REWARD`)
-  - From 0.0 to 1.0, < 0.5 to favor token logprobs more, > 0.5 to favor duration logprobs more. (only used while beam decoding in TDT)
+  - From 0.0 to 1.0, < 0.5 to favor token logprobs more, > 0.5 to favor duration logprobs more. (only used while beam decoding in *TDT* models)
 
 - `--max-words` (default: None, env: `PARAKEET_MAX_WORDS`)
   - Max words per sentence
