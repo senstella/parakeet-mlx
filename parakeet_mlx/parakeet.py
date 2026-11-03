@@ -667,11 +667,222 @@ class ParakeetRNNT(BaseParakeet):
         *,
         config: DecodingConfig = DecodingConfig(),
     ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
-        """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
-        assert isinstance(config.decoding, Greedy), (
-            "Only greedy decoding is supported for RNNT decoder now"
-        )
+        """Run RNNT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
+        mx.eval(features)
 
+        match config.decoding:
+            case Greedy():
+                return self.decode_greedy(
+                    features, lengths, last_token, hidden_state, config=config
+                )
+            case Beam():
+                return self.decode_beam(
+                    features, lengths, last_token, hidden_state, config=config
+                )
+            case _:
+                raise NotImplementedError(
+                    f"{config.decoding} is not supported in RNNT models."
+                )
+
+    def decode_beam(
+        self,
+        features: mx.array,
+        lengths: Optional[mx.array] = None,
+        last_token: Optional[list[Optional[int]]] = None,
+        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
+        *,
+        config: DecodingConfig = DecodingConfig(),
+    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
+        assert isinstance(config.decoding, Beam)  # type guarantee
+
+        beam_token = min(config.decoding.beam_size, len(self.vocabulary) + 1)
+        max_candidates = round(config.decoding.beam_size * config.decoding.patience)
+
+        @dataclass
+        class Hypothesis:
+            score: float
+            step: int
+            last_token: Optional[int]
+            hidden_state: Optional[tuple[mx.array, mx.array]]
+            stuck: int
+            hypothesis: list[AlignedToken]
+
+            def __hash__(self) -> int:
+                return hash((self.step, tuple((x.id for x in self.hypothesis))))
+
+        B, S, *_ = features.shape
+
+        if hidden_state is None:
+            hidden_state = list([None] * B)
+
+        if lengths is None:
+            lengths = mx.array([S] * B)
+
+        if last_token is None:
+            last_token = list([None] * B)
+
+        results = []
+        results_hidden = []
+        for batch in range(B):
+            feature = features[batch : batch + 1]
+            length = int(lengths[batch])
+
+            finished_hypothesis: list[Hypothesis] = []
+            active_beam: list[Hypothesis] = [
+                Hypothesis(
+                    score=0.0,
+                    step=0,
+                    last_token=last_token[batch],
+                    hidden_state=hidden_state[batch],
+                    stuck=0,
+                    hypothesis=[],
+                )
+            ]
+
+            while len(finished_hypothesis) < max_candidates and active_beam:
+                candidates: Dict[int, Hypothesis] = {}
+
+                for hypothesis in active_beam:
+                    decoder_out, (hidden, cell) = self.decoder(
+                        mx.array([[hypothesis.last_token]])
+                        if hypothesis.last_token is not None
+                        else None,
+                        hypothesis.hidden_state,
+                    )
+                    decoder_out = decoder_out.astype(feature.dtype)
+                    decoder_hidden = (
+                        hidden.astype(feature.dtype),
+                        cell.astype(feature.dtype),
+                    )
+
+                    joint_out = self.joint(
+                        feature[:, hypothesis.step : hypothesis.step + 1], decoder_out
+                    )
+
+                    token_logits = joint_out[0, 0, 0]
+                    token_logprobs = nn.log_softmax(token_logits, -1)
+
+                    # raw python ops might be faster from here
+                    token_k = typing.cast(
+                        List[int],
+                        mx.argpartition(token_logprobs, -beam_token)[
+                            -beam_token:
+                        ].tolist(),
+                    )
+
+                    # for faster accessing
+                    token_logprobs = typing.cast(List[float], token_logprobs.tolist())
+
+                    for token in token_k:
+                        is_blank = token == len(self.vocabulary)
+
+                        # rnnt decoding rule
+                        if is_blank:
+                            step = hypothesis.step + 1
+                            stuck = 0
+                        else:
+                            stuck = hypothesis.stuck + 1
+
+                            # prevent stucking
+                            if (
+                                self.max_symbols is not None
+                                and stuck >= self.max_symbols
+                            ):
+                                step = hypothesis.step + 1
+                                stuck = 0
+                            else:
+                                step = hypothesis.step
+
+                        new_hypothesis = Hypothesis(
+                            score=hypothesis.score + token_logprobs[token],
+                            step=step,
+                            last_token=hypothesis.last_token if is_blank else token,
+                            hidden_state=hypothesis.hidden_state
+                            if is_blank
+                            else decoder_hidden,
+                            stuck=stuck,
+                            hypothesis=hypothesis.hypothesis
+                            if is_blank
+                            else (
+                                list(hypothesis.hypothesis)
+                                + [
+                                    AlignedToken(
+                                        id=token,
+                                        start=hypothesis.step * self.time_ratio,  # hop
+                                        duration=1 * self.time_ratio,  # hop
+                                        confidence=math.exp(token_logprobs[token]),
+                                        text=tokenizer.decode([token], self.vocabulary),
+                                    )
+                                ]
+                            ),
+                        )
+
+                        # merge if anyone took same path
+                        key = hash(new_hypothesis)
+                        if key in candidates:
+                            other_hypothesis = candidates[key]
+
+                            # log sum exp
+                            maxima = max(other_hypothesis.score, new_hypothesis.score)
+                            score = maxima + math.log(
+                                math.exp(other_hypothesis.score - maxima)
+                                + math.exp(new_hypothesis.score - maxima)
+                            )
+
+                            if new_hypothesis.score > other_hypothesis.score:
+                                candidates[key] = new_hypothesis
+                            candidates[key].score = score
+                        else:
+                            candidates[key] = new_hypothesis
+
+                finished_hypothesis.extend(
+                    [
+                        hypothesis
+                        for hypothesis in candidates.values()
+                        if hypothesis.step >= length
+                    ]
+                )
+                active_beam = sorted(
+                    [
+                        hypothesis
+                        for hypothesis in candidates.values()
+                        if hypothesis.step < length
+                    ],
+                    key=lambda x: x.score,
+                    reverse=True,
+                )[: config.decoding.beam_size]
+
+            finished_hypothesis = finished_hypothesis + active_beam
+
+            if not finished_hypothesis:
+                results.append([])
+                results_hidden.append(hidden_state[batch])
+            else:
+                length_penalty = (
+                    config.decoding.length_penalty
+                )
+
+                best = max(
+                    finished_hypothesis,
+                    key=lambda x: x.score
+                    / (max(1, len(x.hypothesis)) ** length_penalty),
+                )
+                results.append(best.hypothesis)
+                results_hidden.append(best.hidden_state)
+
+        return results, results_hidden
+
+    def decode_greedy(
+        self,
+        features: mx.array,
+        lengths: Optional[mx.array] = None,
+        last_token: Optional[list[Optional[int]]] = None,
+        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
+        *,
+        config: DecodingConfig = DecodingConfig(),
+    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
+        assert isinstance(config.decoding, Greedy)  # type guarntee
+        
         B, S, *_ = features.shape
 
         if hidden_state is None:
