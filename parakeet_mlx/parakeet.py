@@ -2,7 +2,7 @@ import math
 import typing
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -18,6 +18,7 @@ from parakeet_mlx.alignment import (
     tokens_to_sentences,
 )
 from parakeet_mlx.audio import PreprocessArgs, get_logmel, load_audio
+from parakeet_mlx.boost import EMPTY, Machine, advance, settle, tabulate
 from parakeet_mlx.cache import ConformerCache, RotatingConformerCache
 from parakeet_mlx.conformer import Conformer, ConformerArgs
 from parakeet_mlx.ctc import AuxCTCArgs, ConvASRDecoder, ConvASRDecoderArgs
@@ -84,6 +85,7 @@ class Beam:
     length_penalty: float = 1.0
     patience: float = 1.0
     duration_reward: float = 0.7  # TDT-only
+    booster: Machine = EMPTY
 
 
 @dataclass
@@ -95,6 +97,8 @@ class DecodingConfig:
 # common methods
 class BaseParakeet(nn.Module):
     """Base parakeet model for interface purpose"""
+
+    vocabulary: list[str]
 
     def __init__(self, preprocess_args: PreprocessArgs, encoder_args: ConformerArgs):
         super().__init__()
@@ -150,7 +154,8 @@ class BaseParakeet(nn.Module):
             chunk_duration (float, optional):
                 If provided, splits audio into chunks of this length (in seconds)
                 for processing. When None, processes the entire file at once.
-                Defaults to None.
+                Defaults to None. If chunking is used, booster state won't carry
+                between chunks.
             overlap_duration (float, optional):
                 Overlap between consecutive chunks in seconds. Only used when
                 chunk_duration is specified. Defaults to 15.0.
@@ -295,18 +300,30 @@ class ParakeetTDT(BaseParakeet):
         features: mx.array,
         lengths: Optional[mx.array] = None,
         last_token: Optional[list[Optional[int]]] = None,
-        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
+        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array, Any]]]] = None,
         *,
         config: DecodingConfig = DecodingConfig(),
-    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
-        """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
+    ) -> tuple[
+        list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array, Any]]]
+    ]:
+        """Run TDT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state (hidden, cell, booster)"""
         mx.eval(features)
 
         match config.decoding:
             case Greedy():
-                return self.decode_greedy(
-                    features, lengths, last_token, hidden_state, config=config
+                # greedy doesn't have a booster hidden state!
+                tokens, states = self.decode_greedy(
+                    features,
+                    lengths,
+                    last_token,
+                    (
+                        [state and state[:2] for state in hidden_state]
+                        if hidden_state is not None
+                        else None
+                    ),
+                    config=config,
                 )
+                return tokens, [state and (*state, None) for state in states]
             case Beam():
                 return self.decode_beam(
                     features, lengths, last_token, hidden_state, config=config
@@ -321,15 +338,20 @@ class ParakeetTDT(BaseParakeet):
         features: mx.array,
         lengths: Optional[mx.array] = None,
         last_token: Optional[list[Optional[int]]] = None,
-        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
+        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array, Any]]]] = None,
         *,
         config: DecodingConfig = DecodingConfig(),
-    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
+    ) -> tuple[
+        list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array, Any]]]
+    ]:
         assert isinstance(config.decoding, Beam)  # type guarntee
 
         beam_token = min(config.decoding.beam_size, len(self.vocabulary) + 1)
         beam_duration = min(config.decoding.beam_size, len(self.durations))
         max_candidates = round(config.decoding.beam_size * config.decoding.patience)
+
+        booster = config.decoding.booster
+        booster_deltas = tabulate(booster, len(self.vocabulary))
 
         @dataclass
         class Hypothesis:
@@ -339,6 +361,9 @@ class ParakeetTDT(BaseParakeet):
             hidden_state: Optional[tuple[mx.array, mx.array]]
             stuck: int
             hypothesis: list[AlignedToken]
+
+            boost: float
+            booster_state: Any
 
             def __hash__(self) -> int:
                 return hash((self.step, tuple((x.id for x in self.hypothesis))))
@@ -359,6 +384,18 @@ class ParakeetTDT(BaseParakeet):
         for batch in range(B):
             feature = features[batch : batch + 1]
             length = int(lengths[batch])
+            carried = hidden_state[batch] or ()
+            booster_start = (
+                carried[2]
+                if len(carried) > 2 and carried[2] is not None
+                else booster.start
+            )
+
+            # greedy handles it via condition but oh well
+            if length == 0:
+                results.append([])
+                results_hidden.append(hidden_state[batch])
+                continue
 
             finished_hypothesis: list[Hypothesis] = []
             active_beam: list[Hypothesis] = [
@@ -366,9 +403,11 @@ class ParakeetTDT(BaseParakeet):
                     score=0.0,
                     step=0,
                     last_token=last_token[batch],
-                    hidden_state=hidden_state[batch],
+                    hidden_state=carried[:2] or None,
                     stuck=0,
                     hypothesis=[],
+                    boost=booster.potential(booster_start),
+                    booster_state=booster_start,
                 )
             ]
 
@@ -405,9 +444,16 @@ class ParakeetTDT(BaseParakeet):
                     token_k, duration_k = (
                         typing.cast(
                             List[int],
-                            mx.argpartition(token_logprobs, -beam_token)[
-                                -beam_token:
-                            ].tolist(),
+                            mx.argpartition(
+                                token_logprobs * (1 - config.decoding.duration_reward)
+                                + mx.concatenate(
+                                    [
+                                        booster_deltas(hypothesis.booster_state),
+                                        mx.zeros(1),
+                                    ]
+                                ),
+                                -beam_token,
+                            )[-beam_token:].tolist(),
                         ),
                         typing.cast(
                             List[int],
@@ -425,6 +471,12 @@ class ParakeetTDT(BaseParakeet):
 
                     for token in token_k:
                         is_blank = token == len(self.vocabulary)
+                        next_booster_state, delta = (
+                            (hypothesis.booster_state, 0.0)
+                            if is_blank
+                            else advance(booster, hypothesis.booster_state, token)
+                        )
+
                         for decision in duration_k:
                             duration = self.durations[decision]
                             stuck = 0 if duration != 0 else hypothesis.stuck + 1
@@ -450,6 +502,8 @@ class ParakeetTDT(BaseParakeet):
                                 if is_blank
                                 else decoder_hidden,
                                 stuck=stuck,
+                                boost=hypothesis.boost + delta,
+                                booster_state=next_booster_state,
                                 hypothesis=hypothesis.hypothesis
                                 if is_blank
                                 else (
@@ -505,7 +559,7 @@ class ParakeetTDT(BaseParakeet):
                         for hypothesis in candidates.values()
                         if hypothesis.step < length
                     ],
-                    key=lambda x: x.score,
+                    key=lambda x: x.score + x.boost,
                     reverse=True,
                 )[: config.decoding.beam_size]
 
@@ -519,13 +573,23 @@ class ParakeetTDT(BaseParakeet):
                     config.decoding.length_penalty
                 )  # mypy assumes weirdly so we go in safe way
 
+                norm = (
+                    max(max(1, len(h.hypothesis)) for h in finished_hypothesis)
+                    ** length_penalty
+                )
                 best = max(
                     finished_hypothesis,
-                    key=lambda x: x.score
-                    / (max(1, len(x.hypothesis)) ** length_penalty),
+                    key=lambda x: x.score / max(1, len(x.hypothesis)) ** length_penalty
+                    + (x.boost + settle(booster, x.booster_state)) / norm,
                 )
                 results.append(best.hypothesis)
-                results_hidden.append(best.hidden_state)
+                results_hidden.append(
+                    None
+                    if best.hidden_state is None
+                    else (*best.hidden_state, best.booster_state)
+                )
+
+        booster_deltas.cache_clear()  # pyright: ignore[reportFunctionMemberAccess]
 
         return results, results_hidden
 
@@ -663,18 +727,30 @@ class ParakeetRNNT(BaseParakeet):
         features: mx.array,
         lengths: Optional[mx.array] = None,
         last_token: Optional[list[Optional[int]]] = None,
-        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
+        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array, Any]]]] = None,
         *,
         config: DecodingConfig = DecodingConfig(),
-    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
-        """Run RNNT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state"""
+    ) -> tuple[
+        list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array, Any]]]
+    ]:
+        """Run RNNT decoder with features, optional length and decoder state. Outputs list[list[AlignedToken]] and updated hidden state (hidden, cell, booster)"""
         mx.eval(features)
 
         match config.decoding:
             case Greedy():
-                return self.decode_greedy(
-                    features, lengths, last_token, hidden_state, config=config
+                # greedy doesn't have a booster hidden state!
+                tokens, states = self.decode_greedy(
+                    features,
+                    lengths,
+                    last_token,
+                    (
+                        [state and state[:2] for state in hidden_state]
+                        if hidden_state is not None
+                        else None
+                    ),
+                    config=config,
                 )
+                return tokens, [state and (*state, None) for state in states]
             case Beam():
                 return self.decode_beam(
                     features, lengths, last_token, hidden_state, config=config
@@ -689,14 +765,19 @@ class ParakeetRNNT(BaseParakeet):
         features: mx.array,
         lengths: Optional[mx.array] = None,
         last_token: Optional[list[Optional[int]]] = None,
-        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array]]]] = None,
+        hidden_state: Optional[list[Optional[tuple[mx.array, mx.array, Any]]]] = None,
         *,
         config: DecodingConfig = DecodingConfig(),
-    ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
+    ) -> tuple[
+        list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array, Any]]]
+    ]:
         assert isinstance(config.decoding, Beam)  # type guarantee
 
         beam_token = min(config.decoding.beam_size, len(self.vocabulary) + 1)
         max_candidates = round(config.decoding.beam_size * config.decoding.patience)
+
+        booster = config.decoding.booster
+        booster_deltas = tabulate(booster, len(self.vocabulary))
 
         @dataclass
         class Hypothesis:
@@ -706,6 +787,9 @@ class ParakeetRNNT(BaseParakeet):
             hidden_state: Optional[tuple[mx.array, mx.array]]
             stuck: int
             hypothesis: list[AlignedToken]
+
+            boost: float
+            booster_state: Any
 
             def __hash__(self) -> int:
                 return hash((self.step, tuple((x.id for x in self.hypothesis))))
@@ -726,6 +810,17 @@ class ParakeetRNNT(BaseParakeet):
         for batch in range(B):
             feature = features[batch : batch + 1]
             length = int(lengths[batch])
+            carried = hidden_state[batch] or ()
+            booster_start = (
+                carried[2]
+                if len(carried) > 2 and carried[2] is not None
+                else booster.start
+            )
+
+            if length == 0:
+                results.append([])
+                results_hidden.append(hidden_state[batch])
+                continue
 
             finished_hypothesis: list[Hypothesis] = []
             active_beam: list[Hypothesis] = [
@@ -733,9 +828,11 @@ class ParakeetRNNT(BaseParakeet):
                     score=0.0,
                     step=0,
                     last_token=last_token[batch],
-                    hidden_state=hidden_state[batch],
+                    hidden_state=carried[:2] or None,
                     stuck=0,
                     hypothesis=[],
+                    boost=booster.potential(booster_start),
+                    booster_state=booster_start,
                 )
             ]
 
@@ -765,9 +862,13 @@ class ParakeetRNNT(BaseParakeet):
                     # raw python ops might be faster from here
                     token_k = typing.cast(
                         List[int],
-                        mx.argpartition(token_logprobs, -beam_token)[
-                            -beam_token:
-                        ].tolist(),
+                        mx.argpartition(
+                            token_logprobs
+                            + mx.concatenate(
+                                [booster_deltas(hypothesis.booster_state), mx.zeros(1)]
+                            ),
+                            -beam_token,
+                        )[-beam_token:].tolist(),
                     )
 
                     # for faster accessing
@@ -775,6 +876,11 @@ class ParakeetRNNT(BaseParakeet):
 
                     for token in token_k:
                         is_blank = token == len(self.vocabulary)
+                        next_booster_state, delta = (
+                            (hypothesis.booster_state, 0.0)
+                            if is_blank
+                            else advance(booster, hypothesis.booster_state, token)
+                        )
 
                         # rnnt decoding rule
                         if is_blank:
@@ -801,6 +907,8 @@ class ParakeetRNNT(BaseParakeet):
                             if is_blank
                             else decoder_hidden,
                             stuck=stuck,
+                            boost=hypothesis.boost + delta,
+                            booster_state=next_booster_state,
                             hypothesis=hypothesis.hypothesis
                             if is_blank
                             else (
@@ -848,7 +956,7 @@ class ParakeetRNNT(BaseParakeet):
                         for hypothesis in candidates.values()
                         if hypothesis.step < length
                     ],
-                    key=lambda x: x.score,
+                    key=lambda x: x.score + x.boost,
                     reverse=True,
                 )[: config.decoding.beam_size]
 
@@ -858,17 +966,21 @@ class ParakeetRNNT(BaseParakeet):
                 results.append([])
                 results_hidden.append(hidden_state[batch])
             else:
-                length_penalty = (
-                    config.decoding.length_penalty
-                )
+                length_penalty = config.decoding.length_penalty
 
                 best = max(
                     finished_hypothesis,
-                    key=lambda x: x.score
+                    key=lambda x: (x.score + x.boost + settle(booster, x.booster_state))
                     / (max(1, len(x.hypothesis)) ** length_penalty),
                 )
                 results.append(best.hypothesis)
-                results_hidden.append(best.hidden_state)
+                results_hidden.append(
+                    None
+                    if best.hidden_state is None
+                    else (*best.hidden_state, best.booster_state)
+                )
+
+        booster_deltas.cache_clear()  # pyright: ignore[reportFunctionMemberAccess]
 
         return results, results_hidden
 
@@ -882,7 +994,7 @@ class ParakeetRNNT(BaseParakeet):
         config: DecodingConfig = DecodingConfig(),
     ) -> tuple[list[list[AlignedToken]], list[Optional[tuple[mx.array, mx.array]]]]:
         assert isinstance(config.decoding, Greedy)  # type guarntee
-        
+
         B, S, *_ = features.shape
 
         if hidden_state is None:
@@ -996,6 +1108,10 @@ class ParakeetCTC(BaseParakeet):
         config: DecodingConfig = DecodingConfig(),
     ) -> list[list[AlignedToken]]:
         """Run CTC decoder with features and lengths. Outputs list[list[AlignedToken]]."""
+        assert isinstance(config.decoding, Greedy), (
+            "Only greedy decoding is supported for CTC decoder now"
+        )
+
         B, S, *_ = features.shape
 
         logits = self.decoder(features)
@@ -1141,7 +1257,7 @@ class StreamingParakeet:
 
     audio_buffer: mx.array
     mel_buffer: Optional[mx.array]
-    decoder_hidden: Optional[tuple[mx.array, mx.array]] = None
+    decoder_hidden: Optional[tuple[mx.array, mx.array, Any]] = None
     last_token: Optional[int] = None
 
     finalized_tokens: list[AlignedToken]
@@ -1285,9 +1401,8 @@ class StreamingParakeet:
             )
 
             self.decoder_hidden = finalized_state[0]
-            self.last_token = (
-                finalized_tokens[0][-1].id if len(finalized_tokens[0]) > 0 else None
-            )
+            if finalized_tokens[0]:
+                self.last_token = finalized_tokens[0][-1].id
 
             draft_tokens, _ = self.model.decode(
                 features[:, finalized_length:],

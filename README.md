@@ -208,6 +208,56 @@ result = model.transcribe("audio_file.wav", decoding_config=config)
 print(result.sentences)
 ```
 
+Boost the word "trunks":
+
+```py
+from parakeet_mlx import from_pretrained, DecodingConfig, Beam, boost
+
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+
+config = DecodingConfig(
+    decoding=Beam(
+        booster=boost.lift(
+            boost.prebind(str.lower, 
+                # By binding str.lower before passing it to words, you make it case invariant!
+                # Of course, if you do this, the words must be in lowercase form else it wouldn't boost anything.
+                boost.words({"trunks": 4.0}, boundary=True)
+                # Could also 
+                # boost.prebind(str.upper, boost.words({"TRUNKS": 4.0}, boundary=True))
+            ),
+            model.vocabulary,
+        )
+    )
+)
+
+result = model.transcribe("meinthezoo.wav", decoding_config=config)
+
+# before: ...really, really, really long um fronts. And that's that's cool...
+# after: ...really, really, really long um trunks. And that's that's cool...
+print(result.text)
+```
+
+To get proper casing in some cases (see #62):
+
+```py
+from parakeet_mlx import from_pretrained, DecodingConfig, Beam, boost
+
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+
+# Please note that booster state do NOT carry over each chunks
+config = DecodingConfig(
+    decoding = Beam(
+        booster = boost.lift( # must `lift`!
+            boost.first_uppercase(0.5), # log-probs!
+        )
+    )
+)
+
+result = model.transcribe("audio_file.wav", decoding_config=config)
+
+print(result.sentences)
+```
+
 ## from_pretrained
 
 Using `from_pretrained` downloads a model from Hugging Face and stores the downloaded model in HF's [cache folder](https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache). You can specify the cache folder by passing it `cache_dir` args. It can return one of those Parakeet variants such as: `ParakeetTDT`, `ParakeetRNNT`, `ParakeetCTC`, or `ParakeetTDTCTC`. For general use cases, the `BaseParakeet` abstraction often suffices. However, if you want to call variant-specific functions like `.decode()` and want linters not to complain, `typing.cast` can be used.
@@ -228,6 +278,82 @@ Using `from_pretrained` downloads a model from Hugging Face and stores the downl
   - `start`: Start time in seconds
   - `end`: End time in seconds
   - `duration`: Between `start` and `end`.
+
+## Boosting
+
+For boosting, these are the primitives that can be composed:
+
+```py
+# combine multiple boosting (and others)
+def combine(*machines: Machine[Any, A]) -> Machine[tuple, A]: pass 
+
+# scale those particular group of boosting with a factor
+def scale(factor: float, machine: Machine[S, A]) -> Machine[S, A]: pass 
+
+# a map! 1-to-1
+def premap(f: Callable[[B], A], machine: Machine[S, A]) -> Machine[S, B]: pass 
+
+# an input filter, like python's filter.
+def prefilter(keep: Callable[[A], bool], machine: Machine[S, A]) -> Machine[S, A]: pass
+
+# basically 1-to-many expansion. 
+# I recommend using this over premap if you are `str.lower`ing, 
+# since it handles the case where it outputs multiple letters
+def prebind(f: Callable[[B], Iterable[A]], machine: Machine[S, A]) -> Machine[S, B]: pass 
+
+# boost/penalty words weight in logprob, either freely or with the word boundary 
+def words(weights: dict[str, float], *, boundary: bool = True) -> Machine[..., str]: pass 
+
+# boost the probability of the first alphanumeric character being uppercase by given weight
+def first_uppercase(weight: float) -> Machine[..., str]: pass 
+```
+
+And you always need to call:
+
+```py
+lift(machine, model.vocabulary)
+```
+
+before passing to the `Beam(booster=...)`, to make it operate on token-level instead of characters.
+
+Like this:
+
+```py
+from parakeet_mlx import from_pretrained, DecodingConfig, Beam, boost
+
+model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+
+config = DecodingConfig(
+    decoding=Beam(
+        booster=boost.lift(
+            boost.combine(
+                boost.first_uppercase(0.5), # encourage first letter being uppercase AND
+                boost.scale( # 2X the boosting here
+                    2.0,
+                    boost.prebind( # everything inside sees lowercased 
+                        str.lower,
+                        boost.prefilter( # everything inside now ignore dots
+                            lambda char: char != ".",
+                            boost.premap( # now they think - are space
+                                lambda char: " " if char == "-" else char,
+                                boost.words({"new york": 2.0, "usa": 1.5}),
+                                # so finally, boost New-York, New York, U.S.A, USA
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            model.vocabulary,
+        )
+    )
+)
+
+result = model.transcribe("audio.wav", decoding_config=config)
+
+print(result.sentences)
+```
+
+For advanced users, the whole boosting system is basically just a weighted [Mealy machine](https://en.wikipedia.org/wiki/Mealy_machine) with [potential-based reward (or weight) shaping](https://dl.acm.org/doi/10.5555/645528.657613) and telescoping sum. So you can also express FSMs with it and, hence, express all regular languages if you want. Take a closer look at [boost.py](https://github.com/senstella/parakeet-mlx/blob/master/parakeet_mlx/boost.py) if you need.
 
 ## Streaming Transcription
 
@@ -304,7 +430,7 @@ alignments = model.generate(mel, decoding_config=DecodingConfig())
 - [X] Add CLI for better usability
 - [X] Add support for other Parakeet variants
 - [X] Streaming input (real-time transcription with `transcribe_stream`)
-- [ ] Option to enhance chosen words' accuracy
+- [X] Option to enhance chosen words' accuracy
 - [ ] Chunking with continuous context (partially achieved with streaming)
 
 
