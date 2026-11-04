@@ -189,7 +189,7 @@ result = model.transcribe("audio_file.wav")
 print(result.sentences)
 ```
 
-Specifiy the sentence split options:
+Specify the sentence split options:
 
 ```py
 from parakeet_mlx import from_pretrained, DecodingConfig, SentenceConfig
@@ -237,7 +237,7 @@ result = model.transcribe("meinthezoo.wav", decoding_config=config)
 print(result.text)
 ```
 
-To get proper casing in some cases (see #62):
+To get proper casing in some cases (see [this issue](https://github.com/senstella/parakeet-mlx/issues/62)):
 
 ```py
 from parakeet_mlx import from_pretrained, DecodingConfig, Beam, boost
