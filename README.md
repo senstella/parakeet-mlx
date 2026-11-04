@@ -431,7 +431,6 @@ alignments = model.generate(mel, decoding_config=DecodingConfig())
 - [X] Add support for other Parakeet variants
 - [X] Streaming input (real-time transcription with `transcribe_stream`)
 - [X] Option to enhance chosen words' accuracy
-- [ ] Chunking with continuous context (partially achieved with streaming)
 
 
 ## Acknowledgments
