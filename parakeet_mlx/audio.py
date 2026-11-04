@@ -140,7 +140,13 @@ def get_logmel(x: mx.array, args: PreprocessArgs) -> mx.array:
     if args.pad_to > 0:
         if x.shape[-1] < args.pad_to:
             pad_length = args.pad_to - x.shape[-1]
-            x = mx.pad(x, ((0, pad_length),), constant_values=args.pad_value)
+            x = mx.pad(
+                x,
+                [
+                    (0, pad_length),
+                ],
+                constant_values=args.pad_value,
+            )
 
     if args.preemph is not None:
         x = mx.concat([x[:1], x[1:] - args.preemph * x[:-1]], axis=0)

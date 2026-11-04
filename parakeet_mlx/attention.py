@@ -204,10 +204,10 @@ class RelPositionMultiHeadLocalAttention(RelPositionMultiHeadAttention):
         w = max(self.context_size)
         pad_len = (2 * w - q.shape[2] % (2 * w)) % (2 * w)
 
-        q = mx.pad(q, ((0, 0), (0, 0), (0, pad_len), (0, 0)))
-        k = mx.pad(k, ((0, 0), (0, 0), (0, pad_len), (0, 0)))
-        v = mx.pad(v, ((0, 0), (0, 0), (0, pad_len), (0, 0)))
-        mask = mx.pad(mask, ((0, 0), (0, pad_len)), constant_values=True)
+        q = mx.pad(q, [(0, 0), (0, 0), (0, pad_len), (0, 0)])
+        k = mx.pad(k, [(0, 0), (0, 0), (0, pad_len), (0, 0)])
+        v = mx.pad(v, [(0, 0), (0, 0), (0, pad_len), (0, 0)])
+        mask = mx.pad(mask, [(0, 0), (0, pad_len)], constant_values=True)
 
         q_u = q + mx.expand_dims(self.pos_bias_u, 1)
         q_v = q + mx.expand_dims(self.pos_bias_v, 1)

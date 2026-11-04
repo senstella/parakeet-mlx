@@ -68,7 +68,7 @@ class ConformerCache:
             self.conv = cache_update
 
         result = mx.concatenate([self.conv, x], axis=1)
-        result = mx.pad(result, ((0, 0), (0, padding)))
+        result = mx.pad(result, [(0, 0), (0, padding)])
 
         return result
 
@@ -151,6 +151,6 @@ class RotatingConformerCache(ConformerCache):
                 self.conv = cache_update
 
         result = mx.concatenate([self.conv, x], axis=1)
-        result = mx.pad(result, ((0, 0), (0, padding), (0, 0)))
+        result = mx.pad(result, [(0, 0), (0, padding), (0, 0)])
 
         return result
