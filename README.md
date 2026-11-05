@@ -249,6 +249,7 @@ config = DecodingConfig(
     decoding = Beam(
         booster = boost.lift( # must `lift`!
             boost.first_uppercase(0.5), # log-probs!
+            model.vocabulary,
         )
     )
 )
