@@ -77,10 +77,12 @@ def to_srt(result: AlignedResult, highlight_words: bool = False) -> str:
     if highlight_words:
         for sentence in result.sentences:
             for i, token in enumerate(sentence.tokens):
+                if not token.text.strip():
+                    continue
                 start_time = format_timestamp(token.start, decimal_marker=",")
                 end_time = format_timestamp(
                     token.end
-                    if token == sentence.tokens[-1]
+                    if i == len(sentence.tokens) - 1
                     else sentence.tokens[i + 1].start,
                     decimal_marker=",",
                 )
@@ -94,7 +96,7 @@ def to_srt(result: AlignedResult, highlight_words: bool = False) -> str:
                         )
                     else:
                         text += inner_token.text
-                text.strip()
+                text = text.strip()
 
                 srt_content.append(f"{entry_index}")
                 srt_content.append(f"{start_time} --> {end_time}")
@@ -124,10 +126,12 @@ def to_vtt(result: AlignedResult, highlight_words: bool = False) -> str:
     if highlight_words:
         for sentence in result.sentences:
             for i, token in enumerate(sentence.tokens):
+                if not token.text.strip():
+                    continue
                 start_time = format_timestamp(token.start, decimal_marker=".")
                 end_time = format_timestamp(
                     token.end
-                    if token == sentence.tokens[-1]
+                    if i == len(sentence.tokens) - 1
                     else sentence.tokens[i + 1].start,
                     decimal_marker=".",
                 )
