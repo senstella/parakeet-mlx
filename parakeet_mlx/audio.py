@@ -7,7 +7,7 @@ from subprocess import CalledProcessError, run
 import mlx.core as mx
 import numpy as np
 
-# Slaney mel scale, ported from librosa.filters.mel (ISC licence, https://librosa.org): linear below 1 kHz, logarithmic above
+# slaney mel scale (in librosa.filters.mel, ISC)
 _F_SP = 200.0 / 3
 _MIN_LOG_HZ = 1000.0
 _MIN_LOG_MEL = _MIN_LOG_HZ / _F_SP
@@ -27,8 +27,8 @@ def _mel_to_hz(mels: np.ndarray) -> np.ndarray:
     return hz
 
 
-def _mel_filterbank(*, sample_rate: int, n_fft: int, n_mels: int) -> np.ndarray:
-    """Slaney mel filter bank, (n_mels, n_fft // 2 + 1) float32; matches librosa.filters.mel(norm="slaney", fmin=0, fmax=sr/2)."""
+def slaney_mel_filterbank(*, sample_rate: int, n_fft: int, n_mels: int) -> np.ndarray:
+    """Slaney mel filter bank, (n_mels, n_fft // 2 + 1)"""
     fft_hz = np.fft.rfftfreq(int(n_fft), d=1.0 / sample_rate)
     edges = _mel_to_hz(
         np.linspace(_hz_to_mel(0.0), _hz_to_mel(sample_rate / 2), int(n_mels) + 2)
@@ -68,7 +68,7 @@ class PreprocessArgs:
 
     def __post_init__(self):
         self._filterbanks = mx.array(
-            _mel_filterbank(
+            slaney_mel_filterbank(
                 sample_rate=self.sample_rate, n_fft=self.n_fft, n_mels=self.features
             ),
             dtype=mx.float32,
